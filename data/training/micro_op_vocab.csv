@@ -1,0 +1,15 @@
+micro_op_id,row_label,descricao_pt
+1,micro_op_1_dur_sec,Pegar nos perfis necessários (do carrinho para a mesa de montagem)
+2,micro_op_2_dur_sec,Colocar os perfis nas posições de montagem
+3,micro_op_3_dur_sec,"Fixar a estrutura, recorrendo a fixadores"
+4,micro_op_4_dur_sec,"Realizar as medições, ajustes e alinhamentos prévios"
+5,micro_op_5_dur_sec,Realizar a cravação da estrutura de perfis (clinching)
+6,micro_op_6_dur_sec,Pegar e colocar a primeira placa na estrutura montada
+7,micro_op_7_dur_sec,Realizar as medições e ajustes necessários na placa
+8,micro_op_8_dur_sec,Aparafusar a placa à estrutura de perfis
+9,micro_op_9_dur_sec,Remover os fixadores da estrutura
+10,micro_op_10_dur_sec,Virar a estrutura
+11,micro_op_11_dur_sec,Realizar a cravação da estrutura (clinching)
+12,micro_op_12_dur_sec,Imprimir e colar etiqueta de identificação
+13,micro_op_13_dur_sec,Colocar o produto na palete de madeira
+14,micro_op_14_dur_sec,Transportar mesa até ao início do processo

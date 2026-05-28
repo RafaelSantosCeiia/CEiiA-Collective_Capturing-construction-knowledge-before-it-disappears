@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Convenience launcher that adds the project src to PYTHONPATH and invokes the CLI.
+set -e
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+export PYTHONPATH="$ROOT/src:${PYTHONPATH:-}"
+exec python -m pipeline.cli "$@"
