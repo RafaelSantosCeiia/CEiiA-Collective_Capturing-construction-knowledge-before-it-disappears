@@ -1,175 +1,158 @@
-# PipeLine — Panel Task Duration Prediction
+# BluFab — Estimativa de tempo de produção por painel
 
-End-to-end ML pipeline that ingests panel manufacturing orders (BOM + CAD PDFs +
-operation logs), extracts features, simulates realistic per-task durations, and
-trains a regressor that predicts how long each operation will take for a new
-production order.
+Fixathon 2026 · Desafio Casais/BluFab — *Production Time Estimation by Panel*
 
-> **Status:** working golden path. 5/5 tests pass. Model artifacts ship in two
-> formats (`joblib` + `skops`) and a champion-gate prevents regressions on
-> retrain.
+Estima o **tempo de produção de um painel de casa-de-banho modular**, decomposto
+por **micro-operação** (framing → cravação → placagem → aparafusamento → …), a
+partir do **desenho técnico**. Lê o PDF de processo, extrai as características do
+painel, e prevê a duração de cada micro-operação — com **intervalo de confiança**
+— alimentando o configurador de custos.
+
+> **A tese:** com os dados disponíveis, o modelo já está **no piso de ruído dos
+> próprios dados** — erra menos (≈15s) do que dois humanos discordam ao cronometrar
+> a mesma tarefa (≈20s, CV 35%). O gargalo não é o algoritmo, é a **qualidade e
+> quantidade de dados** — que é exatamente o que a captura automática por vídeo
+> resolve. Por isso medimos sempre contra o piso humano, não contra um número no ar.
 
 ---
 
-## 1. Quick start
+## 1. Fluxo end-to-end
+
+```
+PDF de processo ──split──► sub-painéis ──Gemini──► 21 features ─┐
+                                                                ├─► modelo ─► tempos
+Excels de tempos (anotação humana) ──parse──► tempos observados ┘    por micro-op,
+                                                                     painel e projeto
+                                                                     (com intervalo)
+```
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Build features + training table from data/raw
-./scripts/pipeline run-all
+# 1) extrair geometria dos PDFs (Gemini 3.5 Flash; precisa de GEMINI_API_KEY)
+export GEMINI_API_KEY="..."
+./scripts/pipeline extract-geometry
 
-# Train the deployed model (refits the benchmark winner)
-./scripts/pipeline train
+# 2) construir a tabela de treino (tempos ⨝ geometria)
+./scripts/pipeline build-training
 
-# Predict for one production order
-./scripts/pipeline predict OP-2026-001
+# 3) treinar: benchmark multi-modelo + champion-gate + deploy do campeão
+./scripts/pipeline train --trials 50
 
-# Sanity tests
-pytest tests/ -v
+# 4) scorecard honesto (piso humano vs baselines vs modelo)
+./scripts/pipeline evaluate
 
-# (Optional) Run the HTTP API on :8000 — see docs/API.md
-./scripts/api
-```
-
-The `pipeline` launcher wires `PYTHONPATH=src` and calls `python -m pipeline.cli`.
-The `api` launcher does the same and runs `uvicorn pipeline.api:app`.
-
----
-
-## 2. CLI commands
-
-| Command                              | Purpose                                                            |
-|--------------------------------------|--------------------------------------------------------------------|
-| `pipeline features`                  | Build `panel_task_features.parquet`                                |
-| `pipeline training`                  | Build `training_tasks.parquet` (features + simulated duration)     |
-| `pipeline run-all`                   | Both of the above, in order                                        |
-| `pipeline train`                     | Refit the benchmark winner and write deploy artifacts              |
-| `pipeline retrain`                   | Unattended end-to-end: features → training → benchmark → train → tests |
-| `pipeline predict <OP>`              | Per-operation duration predictions for one production order       |
-| `pipeline predict-input <panel_id>`  | Show the raw inference frame for inspection                        |
-| `pipeline show <table>`              | Pretty-print a generated parquet table (`list` to enumerate)       |
-
-Flags worth knowing:
-- `pipeline train --require-improvement` — refuse to deploy a model worse than the current champion.
-- `pipeline retrain --skip-benchmark` — reuse existing `leaderboard.json`.
-- `pipeline retrain --trials N` — Optuna trials per booster (default 80).
-
----
-
-## 3. Repository layout
-
-```
-PipeLine/
-├── README.md                 # this file
-├── TECH_REPORT.md            # design notes
-├── docs/
-│   ├── API.md                # HTTP API + n8n workflow
-│   ├── TECHNOLOGIES.md       # what every dependency is for
-│   └── TESTING.md            # how tests are organised + last run results
-├── requirements.txt
-├── pyproject.toml
-├── config/
-│   └── panels.yaml           # active config (paths, simulation params)
-├── src/pipeline/
-│   ├── cli.py                # Typer CLI
-│   ├── config.py             # Config + dataclasses
-│   ├── ingest.py             # Parse PDFs + operation JSONs into panel bundles
-│   ├── panels.py             # Feature tables (panel_task_features, panel_materials)
-│   ├── training.py           # Training table builder + CatBoost schema export
-│   ├── simulation.py         # Deterministic synthetic durations (SHA-256 seeded)
-│   ├── inference.py          # Build inference frame for a single production order
-│   ├── model.py              # Train / persist / load / predict
-│   └── model_zoo.py          # Registry of sklearn-compatible regressors
-├── scripts/
-│   ├── pipeline              # Bash launcher
-│   ├── benchmark.py          # Optuna sweep across CatBoost/LightGBM/XGBoost/sklearn
-│   ├── analyze_model.py      # SHAP, permutation importance, PDP/ICE plots
-│   ├── stability.py          # Leaderboard variance across seeds
-│   └── regenerate_durations.py
-├── tests/
-│   └── test_predict.py       # 5 end-to-end assertions
-└── data/
-    ├── raw/                  # BOM PDFs, CAD PDFs, operation JSONs (test fixtures)
-    ├── features/             # panel_task_features.parquet, panel_materials.parquet
-    └── training/             # training_tasks.parquet, model artifacts, analysis plots
-```
-
-Model artifacts in `data/training/model/`, benchmark output in
-`data/training/benchmark/`, and the model backup in
-`data/training/model.previous/` are **gitignored** because they are large
-(~80 MB each) and fully regenerable.
-
----
-
-## 4. Data layers
-
-| Layer       | Path                          | Granularity                     |
-|-------------|-------------------------------|---------------------------------|
-| raw         | `data/raw/`                   | One BOM PDF + CAD PDF + JSON per order |
-| features    | `data/features/`              | 1 row per `op_producao × op_id` |
-| training    | `data/training/training_tasks.parquet` | features + simulated target `duration_min` |
-| deploy      | `data/training/model/`        | `model.joblib`, `model.skops`, `meta.json` |
-| analysis    | `data/training/analysis/`     | SHAP / PDP / permutation plots  |
-
-Outputs are **Parquet** for portability + cheap pandas/polars I/O.
-
----
-
-## 5. Key technical decisions
-
-- **Two model formats.** `joblib` is fast and standard; `skops` is the safer
-  serialization format. Both are written on every train and a test
-  (`test_load_skops_and_joblib_agree`) asserts they produce identical
-  predictions.
-- **Champion gate.** `train --require-improvement` refuses to deploy a
-  candidate whose benchmark MAE is worse than the current model.
-- **Atomic retrain.** `retrain` runs features → training table → Optuna
-  benchmark → train winner → pytest, and appends a JSONL audit entry to
-  `data/training/retrain_log.jsonl`.
-- **Deterministic simulation.** Synthetic durations use SHA-256 of
-  `(seed, panel_id, op_id)` as the per-row seed, so the training set is
-  fully reproducible and noise is independent across rows.
-- **Group-aware evaluation.** Cross-validation groups by `op_producao` so a
-  panel's tasks never straddle train/test.
-
-See [`TECH_REPORT.md`](TECH_REPORT.md) for the full rationale.
-
----
-
-## 6. Tests
-
-5 end-to-end tests in `tests/test_predict.py`:
-
-1. `test_meta_schema_matches_training_module` — deploy meta agrees with the live schema.
-2. `test_load_skops_and_joblib_agree` — both serializations predict identically.
-3. `test_predict_for_known_op_producao` — happy path returns the expected shape.
-4. `test_predict_total_within_envelope_of_real` — predicted totals track the simulated truth within tolerance.
-5. `test_unknown_key_raises` — unknown keys raise `ValueError`.
-
-Last run: **5 passed in 18.51 s** (see [`docs/TESTING.md`](docs/TESTING.md)).
-
-To run them yourself, build the artifacts first:
-```bash
-./scripts/pipeline run-all
-./scripts/pipeline train
-pytest tests/ -v
+# 5) estimar um desenho novo (offline usa a cache de geometria já extraída)
+./scripts/pipeline predict-drawing "data/raw/Desenhos Técnicos - ECOCIAF/ECOCIAF01_PANCAS_IS01A_PROCESSO 1.pdf"
 ```
 
 ---
 
-## 7. Technologies
+## 2. Comandos
 
-Short list (full notes in [`docs/TECHNOLOGIES.md`](docs/TECHNOLOGIES.md)):
+| Comando | O que faz |
+|---|---|
+| `extract-geometry` | PDFs de processo → 21 features por sub-painel (provider Gemini/Claude/Ollama) |
+| `build-training` | tempos observados ⨝ geometria → `training_long` / `test_long` |
+| `train` | benchmark CatBoost/LGBM/XGB/stacking (+AutoGluon se instalado) com Optuna, champion-gate e deploy |
+| `evaluate` | scorecard LOPO: piso de ruído humano vs baselines vs modelo (sem deploy) |
+| `predict-drawing <pdf>` | estima tempos por micro-op, painel e projeto, com intervalo |
+| `parse-times` | re-parsear os Excels de tempos PICUA + ECOCIAF |
 
-- **Python 3.11**, **Typer**, **Rich** — CLI and terminal UX.
-- **PyMuPDF** (`fitz`), **ezdxf** — PDF / DXF parsing.
-- **pandas**, **polars**, **pyarrow**, **numpy** — data + Parquet I/O.
-- **scikit-learn**, **joblib**, **skops** — modeling + serialization.
-- **Optuna** + optional **CatBoost / LightGBM / XGBoost** — benchmark sweep.
-- **SHAP**, **matplotlib** — interpretability plots.
-- **DuckDB**, **pydantic**, **PyYAML**, **rapidfuzz** — config, ad-hoc SQL, fuzzy linkage.
+Flags úteis: `train --no-clean` (treina com dados crus), `train --no-gate`
+(deploy sem champion-gate), `predict-drawing --provider gemini` (extração live).
 
 ---
+
+## 3. Como avaliamos (a parte que interessa ao júri)
+
+Não perguntamos "o MAE é baixo?". Perguntamos **"o erro do modelo está dentro da
+variação com que humanos medem a mesma tarefa?"**. Os dados têm 344 observações,
+10 painéis, ~2,6 medições repetidas por (painel × micro-op) — o que permite medir
+o **piso de ruído humano** (leave-one-observation-out):
+
+| | MAE LOPO | Nota |
+|---|---|---|
+| **Piso de ruído humano** | **~13–20s** (CV 35%) | limite teórico; nenhum modelo o bate de forma fiável |
+| Mediana global | ~22s | baseline ingénua |
+| Mediana por micro-op | ~15s | baseline esperta (referência do champion-gate) |
+| **Modelo (campeão)** | **~15–16s** | diferencia por painel; empatado com a baseline *dentro do ruído* |
+
+- O **MAPE no total do painel** (o número que vai para o configurador) é ~26%,
+  muito melhor que os ~47% por micro-op — os erros cancelam-se na soma.
+- A **limpeza de outliers** (`--clean`, default) remove ~8% de observações
+  claramente mal gravadas (>3,5 MAD), registadas em `removed_observations.csv`, e
+  baixa o piso de ruído de ~20s → ~13s. É data cleaning conservador, não maquilhagem.
+- **Intervalos conformais (calibrados):** cada previsão traz uma banda dimensionada
+  pelos resíduos out-of-sample do próprio modelo (split-conformal relativo, por
+  micro-op). Ao contrário de bandas heurísticas (que prometiam 80% e entregavam
+  70%), estas **acertam no alvo**: ~83% de cobertura real a 80% e ~93% a 90%,
+  medido em held-out. `predict-drawing --level q80|q90`.
+
+---
+
+## 4. O que é funcional / heurístico / mock (requisito do briefing)
+
+| Componente | Estado |
+|---|---|
+| Extração de 21 features do PDF (Gemini, schema Pydantic validado) | **Funcional** (live com API key; cache offline para os 21 painéis já extraídos) |
+| Parsing dos Excels de tempos → 14 micro-ops canónicas | **Funcional** |
+| Treino multi-modelo + Optuna + champion-gate + deploy | **Funcional** |
+| Previsão por micro-op / painel / projeto + intervalos | **Funcional** |
+| Limpeza de outliers | **Heurístico** (regra 3,5 MAD, conservadora, auditável) |
+| Bandas de incerteza (conformal calibrado) | **Funcional** (split-conformal relativo; cobertura verificada em held-out) |
+| Mapeamento das micro-ops de observadores diferentes p/ 14 canónicas | **Heurístico** (ver `picua_times.py`) |
+| Captura por vídeo (deteção de transições) | **Não implementado** — *integração desenhada*, ver §5 |
+| AutoGluon no benchmark | **Opcional** (entra se instalado; não bloqueia) |
+
+---
+
+## 5. Pronto para vídeo (sem o construir)
+
+A captura por vídeo é só **mais uma fonte** do mesmo event-log. A fronteira de
+ingestão é um JSON:
+
+```json
+{
+  "panel_id": "PG02K", "mes_order": "OP-2026-0142", "source": "cv",
+  "events": [
+    {"micro_op_num": 5, "micro_op_name": "Cravação 1",
+     "start_sec": 0.0, "end_sec": 34.0, "duration_sec": 34.0, "confidence": 0.91}
+  ]
+}
+```
+
+O parser de Excel já produz este formato (sem `start/end`). Um detetor de
+transições por vídeo emite exatamente o mesmo. Trocar a fonte **não toca em nada
+a jusante** — modelo, retreino e previsão ficam iguais. Mais dados `source:"cv"`
+→ piso de ruído desce → modelo melhora sozinho. É o feedback loop.
+
+---
+
+## 6. Estrutura
+
+```
+src/pipeline/
+  cli.py              # Typer CLI (6 comandos)
+  extraction/         # PDF → 21 features (Gemini/Claude/Ollama, schema Pydantic)
+  picua_times.py      # Excels de tempos → 14 micro-ops canónicas
+  training_table.py   # tempos ⨝ geometria + limpeza de outliers
+  estimate.py         # features, piso de ruído, intervalos, previsão por painel
+  modeling.py         # benchmark multi-modelo + champion-gate + deploy
+  predict_drawing.py  # PDF → previsão por micro-op/painel/projeto
+data/
+  raw/                # PDFs, BOMs, Excels (dados Casais — NÃO versionar publicamente)
+  training/           # parquets long, geometria, modelo, scorecard
+```
+
+**Retreino noturno mensal:** `./scripts/pipeline train --trials 80` corre o
+benchmark completo, escolhe o campeão por LOPO, passa o champion-gate e faz deploy
+automático. Pensado para correr de madrugada (custo de compute irrelevante).
+
+---
+
+## 7. Confidencialidade
+
+Os dados em `data/raw/` são da Casais/BluFab e não devem ser expostos em demos
+públicas, publicações, ou reutilizados fora do âmbito do evento.

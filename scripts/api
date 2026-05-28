@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Lança a API HTTP. Uso: ./scripts/api [host] [port]
+set -e
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+export PYTHONPATH="$ROOT/src:${PYTHONPATH:-}"
+exec uvicorn pipeline.api:app --host "${1:-0.0.0.0}" --port "${2:-8000}"

@@ -13,8 +13,11 @@ from pathlib import Path
 import fitz  # PyMuPDF
 
 
+# Project-agnostic: qualquer prefixo de projeto + separador + código de painel.
+# O painel é sempre um P-código (PG01K, PCT01K, PL01K, PVB02K, …). Não há lista
+# fixa de projetos — funciona com ISCTE, ECOCIAF, ou qualquer projeto futuro.
 _DWG_RE = re.compile(
-    r"(ECOCIAF|PICUALT|ROBIDOS)(\d*)[_ ]([A-Z]+\d+[A-Z]?)", re.IGNORECASE
+    r"([A-Z][A-Z0-9]+)[ _]+(P[A-Z]{1,3}\d{1,3}[A-Z]?)", re.IGNORECASE
 )
 _IS_RE = re.compile(r"\b(IS\d+[A-Z])\b")
 _REV_RE = re.compile(r"\b([A-Z](?:\.\d+)?)\b\s+(?:Conforme|Produ[çc][ãa]o)", re.IGNORECASE)
@@ -94,17 +97,13 @@ def split_pdf(pdf_path: Path) -> list[SubPanelChunk]:
 
     for i, page in enumerate(doc, start=1):
         text = page.get_text()
-        matches = _DWG_RE.findall(text)
-        # Filter out IS-prefix matches (those are not panel ids)
-        matches = [(p, n, pid) for (p, n, pid) in matches
-                   if not pid.upper().startswith(("IS", "MMBF", "PROCESSO"))]
+        matches = [(proj.upper(), pid.upper()) for (proj, pid) in _DWG_RE.findall(text)]
         if not matches:
             continue
         counter = Counter(matches)
-        (project_name, project_num, panel_id), _ = counter.most_common(1)[0]
-        panel_id = panel_id.upper()
+        (project_name, panel_id), _ = counter.most_common(1)[0]
         pages_by_panel[panel_id].append(i)
-        project_ids[panel_id] = f"{project_name.upper()}{project_num}"
+        project_ids[panel_id] = project_name
 
     chunks: list[SubPanelChunk] = []
     for panel_id, pages in pages_by_panel.items():
