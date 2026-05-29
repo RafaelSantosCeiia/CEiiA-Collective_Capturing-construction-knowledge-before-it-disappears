@@ -150,9 +150,13 @@ Em falha: `status: "failed"`, `error`, `stderr_tail`.
 
 ### `GET /retrain/log?limit=20`
 ```json
-{ "items": [ { "job_id": "...", "status": "deployed", "train_report": {...} } ], "count": 1 }
+{ "items": [ { "job_id": "...", "status": "deployed", "train_report": {"mae": 15.6, "model_name": "catboost"},
+              "prior_mae": 16.5, "improvement_pct": 5.3 } ], "count": 1 }
 ```
 Inclui jobs em memória ainda a correr. Persistido em `data/training/retrain_jobs.json`.
+Cada job deployado é anotado com `prior_mae` (MAE do deploy anterior) e
+`improvement_pct` (> 0 = erro mais baixo, melhor) — usado na coluna *Change* do
+histórico para mostrar "o que mudou".
 
 ### Exemplo de workflow n8n
 1. **Start Retrain** — `POST {base}/retrain` com o body acima → guarda `job_id`.
