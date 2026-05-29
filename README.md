@@ -1,236 +1,239 @@
-# BluFab — Estimativa de tempo de produção por painel
+# BluFab — Per-panel production time estimation
 
-Fixathon 2026 · Desafio Casais/BluFab — *Production Time Estimation by Panel*
+Fixathon 2026 · Casais/BluFab challenge — *Production Time Estimation by Panel*
 
-Estima o **tempo de produção de um painel de casa-de-banho modular**, decomposto
-por **micro-operação** (framing → cravação → placagem → aparafusamento → …), a
-partir do **desenho técnico**. Lê o PDF de processo, extrai as características do
-painel, e prevê a duração de cada micro-operação — com **intervalo de confiança**
-— alimentando o configurador de custos.
+Estimates the **production time of a modular bathroom panel**, broken down by
+**micro-operation** (framing → crimping → boarding → screwing → …), from the
+**technical drawing**. It reads the process PDF, extracts the panel's features,
+and predicts the duration of each micro-operation — with a **confidence
+interval** — feeding the cost configurator.
 
-> **A tese:** com os dados disponíveis, o modelo já está **no piso de ruído dos
-> próprios dados** — erra menos (≈15s) do que dois humanos discordam ao cronometrar
-> a mesma tarefa (≈20s, CV 35%). O gargalo não é o algoritmo, é a **qualidade e
-> quantidade de dados** — que é exatamente o que a captura automática por vídeo
-> resolve. Por isso medimos sempre contra o piso humano, não contra um número no ar.
+> **The thesis:** with the available data, the model is already **at the noise
+> floor of the data itself** — it errs less (≈15s) than two humans disagree when
+> timing the same task (≈20s, CV 35%). The bottleneck is not the algorithm, it is
+> the **quality and quantity of data** — which is exactly what automatic video
+> capture solves. That is why we always measure against the human floor, not
+> against an arbitrary number.
 
 ---
 
-## 1. Fluxo end-to-end
+## 1. End-to-end flow
 
 ```
-PDF de processo ──split──► sub-painéis ──Gemini──► 21 features ─┐
-                                                                ├─► modelo ─► tempos
-Excels de tempos (anotação humana) ──parse──► tempos observados ┘    por micro-op,
-                                                                     painel e projeto
-                                                                     (com intervalo)
+process PDF ──split──► sub-panels ──Gemini──► 21 features ─┐
+                                                           ├─► model ─► times
+time Excels (human annotation) ──parse──► observed times  ─┘    per micro-op,
+                                                                panel and project
+                                                                (with interval)
 ```
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 1) extrair geometria dos PDFs (Gemini 3.5 Flash; precisa de GEMINI_API_KEY)
+# 1) extract geometry from the PDFs (Gemini 3.5 Flash; needs GEMINI_API_KEY)
 export GEMINI_API_KEY="..."
 ./scripts/pipeline extract-geometry
 
-# 2) construir a tabela de treino (tempos ⨝ geometria)
+# 2) build the training table (times ⨝ geometry)
 ./scripts/pipeline build-training
 
-# 3) treinar: benchmark multi-modelo + champion-gate + deploy do campeão
+# 3) train: multi-model benchmark + champion-gate + champion deploy
 ./scripts/pipeline train --trials 50
 
-# 4) scorecard honesto (piso humano vs baselines vs modelo)
+# 4) honest scorecard (human floor vs baselines vs model)
 ./scripts/pipeline evaluate
 
-# 5) estimar um desenho novo (offline usa a cache de geometria já extraída)
+# 5) estimate a new drawing (offline uses the already-extracted geometry cache)
 ./scripts/pipeline predict-drawing "data/raw/Desenhos Técnicos - ECOCIAF/ECOCIAF01_PANCAS_IS01A_PROCESSO 1.pdf"
 ```
 
 ---
 
-## 2. Comandos
+## 2. Commands
 
-| Comando | O que faz |
+| Command | What it does |
 |---|---|
-| `extract-geometry` | PDFs de processo → 21 features por sub-painel (provider Gemini/Claude/Ollama) |
-| `build-training` | tempos observados ⨝ geometria → `training_long` / `test_long` |
-| `train` | benchmark CatBoost/LGBM/XGB/stacking (+AutoGluon se instalado) com Optuna, champion-gate e deploy |
-| `evaluate` | scorecard LOPO: piso de ruído humano vs baselines vs modelo (sem deploy) |
-| `predict-drawing <pdf>` | estima tempos por micro-op, painel e projeto, com intervalo |
-| `parse-times` | re-parsear os Excels de tempos PICUA + ECOCIAF |
-| `future-build` | **[demo · dados fictícios]** gera os datasets sintéticos + treina os 4 modelos da *Visão de Futuro* (ver §6) |
+| `extract-geometry` | process PDFs → 21 features per sub-panel (provider Gemini/Claude/Ollama) |
+| `build-training` | observed times ⨝ geometry → `training_long` / `test_long` |
+| `train` | benchmark CatBoost/LGBM/XGB/stacking (+AutoGluon if installed) with Optuna, champion-gate and deploy |
+| `evaluate` | LOPO scorecard: human noise floor vs baselines vs model (no deploy) |
+| `predict-drawing <pdf>` | estimates times per micro-op, panel and project, with interval |
+| `parse-times` | re-parse the PICUA + ECOCIAF time Excels |
+| `future-build` | **[demo · fictitious data]** generates the synthetic datasets + trains the 4 *Future Vision* models (see §6) |
 
-Flags úteis: `train --no-clean` (treina com dados crus), `train --no-gate`
-(deploy sem champion-gate), `predict-drawing --provider gemini` (extração live).
+Useful flags: `train --no-clean` (train on raw data), `train --no-gate` (deploy
+without champion-gate), `predict-drawing --provider gemini` (live extraction;
+falls back to the geometry cache if the provider is unavailable).
 
-### API, frontend e n8n
+### API, frontend and n8n
 
 ```bash
-# servir a API (frontend + n8n consomem esta)
+# serve the API (frontend + n8n consume this)
 PYTHONPATH=src python -m uvicorn pipeline.api:app --host 127.0.0.1 --port 8000
 
-# frontend (React in-browser, sem build)
+# frontend (in-browser React, no build step)
 python -m http.server 5500 -d frontend     # http://127.0.0.1:5500
 ```
 
-O frontend está organizado por audiência, em três grupos na barra lateral
-(navegação por hash — `#predict`, `#metrics`, … — com deep-link e botão "voltar"):
+The frontend is organised by audience, in three sidebar groups (hash routing —
+`#predict`, `#metrics`, … — with deep-links and browser back/forward):
 
-- **Operations** (chão de fábrica + comercial):
-  - **Live Dashboard** — mock de chão de fábrica (dados simulados, com selo *DEMO*
-    e tooltips). Tem **Wall mode**: vista quiosque para um ecrã montado, com o painel
-    em produção como herói (código + cronómetro grandes, legíveis à distância) e as
-    tabelas densas escondidas.
-  - **Predictor** — código de painel ou PDF → previsão. Lidera com o **total + intervalo
-    de confiança** (q80/q90); detalhe por micro-op colapsado; **Recent orders** (histórico
-    local, re-correr num clique); export **CSV** (com intervalos) e **PDF de cotação** de
-    uma página.
-- **Model** (dono de ML):
-  - **Model Metrics** — chip de saúde do modelo, curva de aprendizagem e calibração, em
-    linguagem simples.
-  - **Training** — retreino manual + agendamento (o n8n arranca o retreino por aqui).
-  - **History** (*Retrain history*) — cada retreino, **o que mudou** (Δ MAE vs deploy
-    anterior), e detalhe clicável.
-- **Vision**: **Future Vision** — a demonstração de §6 (dados fictícios).
+- **Operations** (shop floor + sales):
+  - **Live Dashboard** — shop-floor mock (simulated data, with a *DEMO* badge and
+    tooltips). It has a **Wall mode**: a kiosk view for a mounted display, with the
+    in-production panel as the hero (large code + timer, readable from a distance)
+    and the dense tables hidden.
+  - **Predictor** — panel code or PDF → prediction. Leads with the **total +
+    confidence range** (q80/q90); per-micro-op detail is collapsed by default;
+    **Recent orders** (local history, one-click re-run); **CSV** export (with
+    intervals) and a one-page branded **PDF quote**.
+- **Model** (ML owner):
+  - **Model Metrics** — model-health chip, learning curve and calibration, in
+    plain language.
+  - **Training** — manual retrain + scheduling (n8n triggers the retrain here).
+  - **History** (*Retrain history*) — each retrain, **what changed** (Δ MAE vs the
+    previous deploy), and a clickable detail modal.
+- **Vision**: **Future Vision** — the §6 demonstration (fictitious data).
 
-As previsões e estados persistem ao trocar de separador (cache em memória).
+Predictions and state persist when switching tabs (in-memory cache).
 
-Para n8n / exposição pública: define `API_KEY` no `.env` (ativa o header `X-API-Key`)
-e abre um túnel (`cloudflared tunnel --url http://127.0.0.1:8000` ou `ngrok http 8000`).
-Endpoints de previsão, retreino e agendamento (e o fluxo n8n) estão em
-[`docs/API.md`](docs/API.md).
+For n8n / public exposure: set `API_KEY` in `.env` (enables the `X-API-Key`
+header) and open a tunnel (`cloudflared tunnel --url http://127.0.0.1:8000` or
+`ngrok http 8000`). Prediction, retrain and scheduling endpoints (and the n8n
+flow) are documented in [`docs/API.md`](docs/API.md).
 
 ---
 
-## 3. Como avaliamos (a parte que interessa ao júri)
+## 3. How we evaluate (the part that matters to the jury)
 
-Não perguntamos "o MAE é baixo?". Perguntamos **"o erro do modelo está dentro da
-variação com que humanos medem a mesma tarefa?"**. Os dados têm 344 observações,
-10 painéis, ~2,6 medições repetidas por (painel × micro-op) — o que permite medir
-o **piso de ruído humano** (leave-one-observation-out):
+We don't ask "is the MAE low?". We ask **"is the model's error within the
+variation with which humans measure the same task?"**. The data has 344
+observations, 10 panels, ~2.6 repeated measurements per (panel × micro-op) — which
+lets us measure the **human noise floor** (leave-one-observation-out):
 
-| | MAE LOPO | Nota |
+| | LOPO MAE | Note |
 |---|---|---|
-| **Piso de ruído humano** | **~13–20s** (CV 35%) | limite teórico; nenhum modelo o bate de forma fiável |
-| Mediana global | ~22s | baseline ingénua |
-| Mediana por micro-op | ~15s | baseline esperta (referência do champion-gate) |
-| **Modelo (campeão)** | **~15–16s** | diferencia por painel; empatado com a baseline *dentro do ruído* |
+| **Human noise floor** | **~13–20s** (CV 35%) | theoretical limit; no model reliably beats it |
+| Global median | ~22s | naive baseline |
+| Per-micro-op median | ~15s | smart baseline (the champion-gate reference) |
+| **Model (champion)** | **~15–16s** | differentiates per panel; tied with the baseline *within the noise* |
 
-- O **MAPE no total do painel** (o número que vai para o configurador) é ~26%,
-  muito melhor que os ~47% por micro-op — os erros cancelam-se na soma.
-- A **limpeza de outliers** (`--clean`, default) remove ~8% de observações
-  claramente mal gravadas (>3,5 MAD), registadas em `removed_observations.csv`, e
-  baixa o piso de ruído de ~20s → ~13s. É data cleaning conservador, não maquilhagem.
-- **Intervalos conformais (calibrados):** cada previsão traz uma banda dimensionada
-  pelos resíduos out-of-sample do próprio modelo (split-conformal relativo, por
-  micro-op). Ao contrário de bandas heurísticas (que prometiam 80% e entregavam
-  70%), estas **acertam no alvo**: ~83% de cobertura real a 80% e ~93% a 90%,
-  medido em held-out. `predict-drawing --level q80|q90`.
+- The **panel-total MAPE** (the number that goes to the configurator) is ~26%,
+  much better than the ~47% per micro-op — errors cancel out in the sum.
+- **Outlier cleaning** (`--clean`, default) removes ~8% of clearly mis-recorded
+  observations (>3.5 MAD), logged in `removed_observations.csv`, and lowers the
+  noise floor from ~20s → ~13s. It is conservative data cleaning, not make-up.
+- **Conformal intervals (calibrated):** each prediction carries a band sized by
+  the model's own out-of-sample residuals (relative split-conformal, per
+  micro-op). Unlike heuristic bands (which promised 80% and delivered 70%), these
+  **hit the target**: ~83% real coverage at 80% and ~93% at 90%, measured on
+  held-out data. `predict-drawing --level q80|q90`.
 
 ---
 
-## 4. O que é funcional / heurístico / mock (requisito do briefing)
+## 4. What is functional / heuristic / mock (briefing requirement)
 
-| Componente | Estado |
+| Component | Status |
 |---|---|
-| Extração de 21 features do PDF (Gemini, schema Pydantic validado) | **Funcional** (live com API key; cache offline para os 21 painéis já extraídos) |
-| Parsing dos Excels de tempos → 14 micro-ops canónicas | **Funcional** |
-| Treino multi-modelo + Optuna + champion-gate + deploy | **Funcional** |
-| Previsão por micro-op / painel / projeto + intervalos | **Funcional** |
-| Limpeza de outliers | **Heurístico** (regra 3,5 MAD, conservadora, auditável) |
-| Bandas de incerteza (conformal calibrado) | **Funcional** (split-conformal relativo; cobertura verificada em held-out) |
-| Mapeamento das micro-ops de observadores diferentes p/ 14 canónicas | **Heurístico** (ver `picua_times.py`) |
-| Captura por vídeo (deteção de transições) | **Não implementado** — *integração desenhada*, ver §5 |
-| AutoGluon no benchmark | **Opcional** (entra se instalado; não bloqueia) |
-| Página *Visão de Futuro* (4 modelos: desperdício, temperatura, experiência, hora) | **Demonstrativo** — **dados fictícios**; ilustra padrões que dados mais ricos desbloqueariam, **não** são resultados reais (ver §6) |
+| 21-feature extraction from the PDF (Gemini, validated Pydantic schema) | **Functional** (live with API key; offline cache for the 21 already-extracted panels) |
+| Parsing the time Excels → 14 canonical micro-ops | **Functional** |
+| Multi-model training + Optuna + champion-gate + deploy | **Functional** |
+| Prediction per micro-op / panel / project + intervals | **Functional** |
+| Outlier cleaning | **Heuristic** (3.5 MAD rule, conservative, auditable) |
+| Uncertainty bands (calibrated conformal) | **Functional** (relative split-conformal; coverage verified on held-out) |
+| Mapping micro-ops from different observers to the 14 canonical ones | **Heuristic** (see `picua_times.py`) |
+| Video capture (transition detection) | **Not implemented** — *integration designed*, see §5 |
+| AutoGluon in the benchmark | **Optional** (joins if installed; does not block) |
+| *Future Vision* page (4 models: waste, temperature, experience, time of day) | **Demonstrative** — **fictitious data**; illustrates patterns richer data would unlock, **not** real results (see §6) |
 
 ---
 
-## 5. Pronto para vídeo (sem o construir)
+## 5. Video-ready (without building it)
 
-A captura por vídeo é só **mais uma fonte** do mesmo event-log. A fronteira de
-ingestão é um JSON:
+Video capture is just **one more source** of the same event-log. The ingestion
+boundary is a JSON:
 
 ```json
 {
   "panel_id": "PG02K", "mes_order": "OP-2026-0142", "source": "cv",
   "events": [
-    {"micro_op_num": 5, "micro_op_name": "Cravação 1",
+    {"micro_op_num": 5, "micro_op_name": "Crimp frame",
      "start_sec": 0.0, "end_sec": 34.0, "duration_sec": 34.0, "confidence": 0.91}
   ]
 }
 ```
 
-O parser de Excel já produz este formato (sem `start/end`). Um detetor de
-transições por vídeo emite exatamente o mesmo. Trocar a fonte **não toca em nada
-a jusante** — modelo, retreino e previsão ficam iguais. Mais dados `source:"cv"`
-→ piso de ruído desce → modelo melhora sozinho. É o feedback loop.
+The Excel parser already produces this format (without `start/end`). A video
+transition detector emits exactly the same. Swapping the source **touches nothing
+downstream** — model, retraining and prediction stay identical. More `source:"cv"`
+data → the noise floor drops → the model improves on its own. That's the feedback
+loop.
 
 ---
 
-## 6. Visão de futuro — o que dados mais ricos desbloqueiam (dados FICTÍCIOS)
+## 6. Future vision — what richer data unlocks (FICTITIOUS data)
 
-A §5 explica como a captura por vídeo alimenta o mesmo event-log com muito mais
-dados. Esta página é uma **demonstração interativa** desse futuro: com **dados
-fictícios** — gerados a partir da geometria *real* dos painéis, para os tempos
-fazerem sentido (painel maior → mais tempo) — mostramos os padrões acionáveis que
-mais medições permitiriam descobrir, e que o modelo atual (10 painéis) não vê.
+§5 explains how video capture feeds the same event-log with far more data. This
+page is an **interactive demonstration** of that future: with **fictitious data**
+— generated from the *real* panel geometry, so the times make sense (bigger panel
+→ more time) — we show the actionable patterns more measurements would reveal, and
+which the current model (10 panels) can't see.
 
-Quatro modelos sintéticos (CatBoost, com a **mesma avaliação honesta** do pipeline
-real — LOPO + intervalos conformais):
+Four synthetic models (CatBoost, with the **same honest evaluation** as the real
+pipeline — LOPO + conformal intervals):
 
-| Modelo | O que demonstra |
+| Model | What it demonstrates |
 |---|---|
-| **General** | separa trabalho produtivo de dois tipos de desperdício: *idle sem valor* (aleatório → intervalo largo, imprevisível) vs *deslocação por material* (sistemático → intervalo estreito, **alvo claro de otimização** de processo) |
-| **Temperature** | produtividade vs temperatura ambiente — ótima a ~20°C, muito pior no calor que no frio |
-| **Experience** | operários com mais experiência são mais rápidos, de forma consistente |
-| **Time of day** | quebra de produtividade após o almoço e ao fim do dia |
+| **General** | separates productive work from two kinds of waste: *no-value idle* (random → wide interval, unpredictable) vs *material run* (systematic → narrow interval, a **clear process-optimization target**) |
+| **Temperature** | productivity vs ambient temperature — best at ~20°C, much worse hot than cold |
+| **Experience** | more experienced operators are consistently faster |
+| **Time of day** | productivity dip after lunch and at the end of the day |
 
 ```bash
-./scripts/pipeline future-build      # gera os datasets sintéticos + treina os 4 modelos
+./scripts/pipeline future-build      # generates the synthetic datasets + trains the 4 models
 ```
 
-No frontend, o botão **Future Vision** abre uma página à parte (fora da barra
-lateral): a previsão central pelo modelo *general* (com o breakdown de desperdício)
-e, por baixo, **curvas de cenário** que mostram como temperatura, experiência e hora
-do dia movem o tempo. Subsistema **100% paralelo** — vive em `src/pipeline/future/`
-e `data/training/future/`, com endpoints próprios (`/future/*`), e **não toca** no
-pipeline/modelo real.
+In the frontend, the **Future Vision** sidebar entry opens a dedicated page: the
+central estimate from the *general* model (with the waste breakdown) and, below,
+**scenario curves** showing how temperature, experience and time of day move the
+time. A **100% parallel** subsystem — it lives in `src/pipeline/future/` and
+`data/training/future/`, with its own endpoints (`/future/*`), and **does not
+touch** the real pipeline/model.
 
-> **Importante para o júri:** esta secção usa **dados inventados** para ilustrar o
-> *valor* de dados mais ricos — é uma prova de conceito do feedback loop da §5, não
-> resultados reais.
+> **Important for the jury:** this section uses **made-up data** to illustrate the
+> *value* of richer data — it is a proof of concept of the §5 feedback loop, not
+> real results.
 
 ---
 
-## 7. Estrutura
+## 7. Structure
 
 ```
 src/pipeline/
   cli.py              # Typer CLI (extract/build/train/evaluate/predict/parse + future-build)
-  extraction/         # PDF → 21 features (Gemini/Claude/Ollama, schema Pydantic)
-  picua_times.py      # Excels de tempos → 14 micro-ops canónicas
-  training_table.py   # tempos ⨝ geometria + limpeza de outliers
-  estimate.py         # features, piso de ruído, intervalos, previsão por painel
-  modeling.py         # benchmark multi-modelo + champion-gate + deploy
-  predict_drawing.py  # PDF → previsão por micro-op/painel/projeto
-  api.py              # API HTTP (FastAPI) — pipeline + retreino + /future/*
-  future/             # [demo] visão de futuro: dados sintéticos + 4 modelos (§6)
+  extraction/         # PDF → 21 features (Gemini/Claude/Ollama, Pydantic schema)
+  picua_times.py      # time Excels → 14 canonical micro-ops
+  training_table.py   # times ⨝ geometry + outlier cleaning
+  estimate.py         # features, noise floor, intervals, per-panel prediction
+  modeling.py         # multi-model benchmark + champion-gate + deploy
+  predict_drawing.py  # PDF → prediction per micro-op/panel/project
+  api.py              # HTTP API (FastAPI) — pipeline + retrain + /future/*
+  future/             # [demo] future vision: synthetic data + 4 models (§6)
 data/
-  raw/                # PDFs, BOMs, Excels (dados Casais — NÃO versionar publicamente)
-  training/           # parquets long, geometria, modelo, scorecard
-  training/future/    # [demo] datasets sintéticos + 4 modelos da Visão de Futuro
-frontend/             # React in-browser (sem build): Predictor, Metrics, …, Future Vision
+  raw/                # PDFs, BOMs, Excels (Casais data — DO NOT publish)
+  training/           # long parquets, geometry, model, scorecard
+  training/future/    # [demo] synthetic datasets + the 4 Future Vision models
+frontend/             # in-browser React (no build): Predictor, Metrics, …, Future Vision
 ```
 
-**Retreino noturno mensal:** `./scripts/pipeline train --trials 80` corre o
-benchmark completo, escolhe o campeão por LOPO, passa o champion-gate e faz deploy
-automático. Pensado para correr de madrugada (custo de compute irrelevante).
+**Monthly overnight retrain:** `./scripts/pipeline train --trials 80` runs the
+full benchmark, picks the champion by LOPO, passes the champion-gate and deploys
+automatically. Designed to run overnight (compute cost negligible).
 
 ---
 
-## 8. Confidencialidade
+## 8. Confidentiality
 
-Os dados em `data/raw/` são da Casais/BluFab e não devem ser expostos em demos
-públicas, publicações, ou reutilizados fora do âmbito do evento.
+The data in `data/raw/` belongs to Casais/BluFab and must not be exposed in public
+demos, publications, or reused outside the scope of the event.

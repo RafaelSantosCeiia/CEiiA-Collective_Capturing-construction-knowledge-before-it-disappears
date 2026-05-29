@@ -119,7 +119,7 @@ def benchmark(d: pd.DataFrame, trials: int = 30) -> dict:
             tuned[name] = factory
             print(f"  {name:16} LOPO MAE = {_m(folds):.2f}s")
         except Exception as e:
-            print(f"  {tuner.__name__} falhou: {type(e).__name__}: {e}")
+            print(f"  {tuner.__name__} failed: {type(e).__name__}: {e}")
 
     # stacking dos boosters afinados (meta-learner = ridge)
     if len(tuned) >= 2:
@@ -134,7 +134,7 @@ def benchmark(d: pd.DataFrame, trials: int = 30) -> dict:
             results["stacking"] = {"mae": _m(folds), "folds": folds, "params": {}}
             print(f"  {'stacking':16} LOPO MAE = {_m(folds):.2f}s")
         except Exception as e:
-            print(f"  stacking falhou: {type(e).__name__}: {e}")
+            print(f"  stacking failed: {type(e).__name__}: {e}")
 
     # AutoGluon (opcional — só se instalado)
     ag = _benchmark_autogluon(d)
@@ -149,7 +149,7 @@ def _benchmark_autogluon(d: pd.DataFrame):
     try:
         from autogluon.tabular import TabularPredictor  # noqa
     except ImportError:
-        print("  autogluon: não instalado (opcional — `pip install autogluon.tabular`)")
+        print("  autogluon: not installed (optional — `pip install autogluon.tabular`)")
         return None
     from autogluon.tabular import TabularPredictor
     folds = {}
@@ -284,7 +284,7 @@ def run(trials: int = 30, clean: bool = True, require_improvement: bool = True,
     build_training_table()
     d = E.load_data(clean=clean, holdout=holdout)
     floor = E.human_noise_floor(d)
-    print(f"\nDataset: {len(d)} obs, {d[E.GROUP].nunique()} painéis | piso humano {floor['mae']:.1f}s")
+    print(f"\nDataset: {len(d)} obs, {d[E.GROUP].nunique()} panels | human floor {floor['mae']:.1f}s")
 
     print("\n=== Benchmark (LOPO) ===")
     lb = benchmark(d, trials=trials)
@@ -298,14 +298,14 @@ def run(trials: int = 30, clean: bool = True, require_improvement: bool = True,
     champ = min(candidates, key=lambda k: lb[k]["mae"]) if candidates else "per_op_median"
     gate_ok = (not require_improvement) or (lb[champ]["mae"] <= baseline_mae * GATE_TOL)
     if not gate_ok:
-        print(f"\n⚠️  Champion-gate: melhor modelo ({lb[champ]['mae']:.1f}s) está >20% acima da "
-              f"baseline ({baseline_mae:.1f}s) → algo partido, deploy da baseline.")
+        print(f"\n⚠️  Champion-gate: best model ({lb[champ]['mae']:.1f}s) is >20% above the "
+              f"baseline ({baseline_mae:.1f}s) → something is broken, deploying the baseline.")
         champ = "per_op_median"
     else:
         print(f"\n   Gate OK: {champ} {lb[champ]['mae']:.1f}s ≤ baseline×1.2 ({baseline_mae*GATE_TOL:.1f}s) "
-              f"— diferencia painéis ao custo de ~{lb[champ]['mae']-baseline_mae:+.1f}s (dentro do ruído).")
+              f"— differentiates panels at a cost of ~{lb[champ]['mae']-baseline_mae:+.1f}s (within the noise).")
 
-    print(f"\n🏆 Campeão: {champ}  (LOPO MAE {lb[champ]['mae']:.2f}s vs piso {floor['mae']:.1f}s)")
+    print(f"\n🏆 Champion: {champ}  (LOPO MAE {lb[champ]['mae']:.2f}s vs floor {floor['mae']:.1f}s)")
     meta = deploy(champ, d, lb, output_dir, timestamp=timestamp)
 
     report = {
@@ -323,7 +323,7 @@ def run(trials: int = 30, clean: bool = True, require_improvement: bool = True,
         from .metrics import write_metrics
         write_metrics(d, output_dir.parent / "metrics.json")
     except Exception as e:
-        print(f"métricas falharam: {type(e).__name__}: {e}")
+        print(f"metrics failed: {type(e).__name__}: {e}")
 
     _print_scorecard(report, lb)
     return report
@@ -332,15 +332,15 @@ def run(trials: int = 30, clean: bool = True, require_improvement: bool = True,
 def _print_scorecard(report: dict, lb: dict) -> None:
     f = report["human_noise_floor"]
     print(f"\n{'='*56}\n SCORECARD\n{'='*56}")
-    print(f" Piso de ruído humano: MAE {f['mae']:.1f}s · CV {f['cv_median_pct']:.0f}% (limite teórico)\n")
-    print(f" {'Modelo':18}{'LOPO MAE':>10}")
+    print(f" Human noise floor: MAE {f['mae']:.1f}s · CV {f['cv_median_pct']:.0f}% (theoretical limit)\n")
+    print(f" {'Model':18}{'LOPO MAE':>10}")
     for name, v in lb.items():
         star = " 🏆" if name == report["champion"] else ""
         print(f"   {name:16}{v['mae']:8.1f}s{star}")
     cc = report.get("conformal_coverage", {})
     if cc:
-        print("\n Intervalos conformais (cobertura calibrada vs alvo):")
-        for lvl, alvo in (("q80", 80), ("q90", 90)):
+        print("\n Conformal intervals (calibrated coverage vs target):")
+        for lvl, target in (("q80", 80), ("q90", 90)):
             if lvl in cc:
-                print(f"   alvo {alvo}%: cobre {cc[lvl]['coverage_pct']:.0f}% "
-                      f"· largura média {cc[lvl]['mean_width_sec']:.0f}s")
+                print(f"   target {target}%: covers {cc[lvl]['coverage_pct']:.0f}% "
+                      f"· mean width {cc[lvl]['mean_width_sec']:.0f}s")

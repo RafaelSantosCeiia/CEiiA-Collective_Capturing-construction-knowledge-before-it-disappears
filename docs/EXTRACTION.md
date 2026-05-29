@@ -1,73 +1,86 @@
-# Pipeline de extracção das 21 features dos PDFs
+# 21-feature extraction pipeline from the PDFs
 
-Cada sub-painel ECOCIAF tem 2–4 páginas no PDF de processo (`ECOCIAF01_PANCAS_IS01A_PROCESSO 1.pdf` etc.). Esta pipeline:
+Each ECOCIAF sub-panel spans 2–4 pages in the process PDF
+(`ECOCIAF01_PANCAS_IS01A_PROCESSO 1.pdf` etc.). This pipeline:
 
-1. Detecta cada sub-painel pelo título (`ECOCIAF01_<PANEL_ID>`).
-2. Extrai só as páginas desse painel.
-3. Envia ao provider escolhido com um prompt único em PT.
-4. Valida a resposta contra o schema Pydantic (21 features + 4 chaves).
-5. Grava em `data/training/panel_geometry.parquet`.
+1. Detects each sub-panel by its title (`ECOCIAF01_<PANEL_ID>`).
+2. Extracts only that panel's pages.
+3. Sends them to the chosen provider with a single prompt.
+4. Validates the response against the Pydantic schema (21 features + 4 keys).
+5. Writes to `data/training/panel_geometry.parquet`.
 
-## Modelo escolhido — **Gemini 3.5 Flash**
+## Chosen model — **Gemini 3.5 Flash**
 
-Provider default. Inspecção manual contra um punhado de painéis (PG02K, PCT01K, …)
-mostrou boa fidelidade às cotas do desenho. Latência ~13 s/painel, custo
-~$0,0003/painel. Para os ~21 sub-painéis ECOCIAF: poucos minutos, ~$0,007 total.
+Default provider. Manual inspection against a handful of panels (PG02K, PCT01K, …)
+showed good fidelity to the drawing dimensions. Latency ~13 s/panel, cost
+~$0.0003/panel. For the ~21 ECOCIAF sub-panels: a few minutes, ~$0.007 total.
 
-> **Heurístico/inferido:** a extração é validada pelo schema Pydantic (tipos +
-> limites físicos), mas os valores não foram auditados campo-a-campo contra todos
-> os desenhos. Tratar como "inferido com validação de sanidade", não "verdade".
+> **Heuristic/inferred:** the extraction is validated by the Pydantic schema
+> (types + physical bounds), but the values were not audited field-by-field
+> against every drawing. Treat as "inferred with sanity validation", not "truth".
 
-## Providers suportados
+## Supported providers
 
-| Provider | Modelo default | Onde corre | Custo aproximado |
+| Provider | Default model | Where it runs | Approximate cost |
 |---|---|---|---|
-| **`gemini`** (default) | `gemini-3.5-flash` | Cloud, free tier OK | ~$0,0003 por painel |
-| `claude` | `claude-sonnet-4-6` | Cloud, plano MAX | ~$0,01–0,03 por painel |
-| `ollama` | `qwen2.5vl:7b` | Local (Ollama) | Grátis |
+| **`gemini`** (default) | `gemini-3.5-flash` | Cloud, free tier OK | ~$0.0003 per panel |
+| `claude` | `claude-sonnet-4-6` | Cloud, MAX plan | ~$0.01–0.03 per panel |
+| `ollama` | `qwen2.5vl:7b` | Local (Ollama) | Free |
 
-Para adicionar outro provider, cria `src/pipeline/extraction/extractors/<nome>.py` que extende `Extractor` e regista-se com `@register("nome")`.
+To add another provider, create `src/pipeline/extraction/extractors/<name>.py`
+that extends `Extractor` and register it with `@register("name")`.
 
-## Configuração
+## Configuration
 
 ```bash
-# Para Gemini (escolha por defeito)
-export GEMINI_API_KEY="AQ..."          # ou GOOGLE_API_KEY
+# For Gemini (default choice)
+export GEMINI_API_KEY="AQ..."          # or GOOGLE_API_KEY
 
-# Para Claude
+# For Claude
 export ANTHROPIC_API_KEY="sk-ant-…"
 
-# Para Ollama (corre localmente)
+# For Ollama (runs locally)
 ollama serve
 ollama pull qwen2.5vl:7b
 ```
 
-## Comandos
+## Commands
 
 ```bash
-# Extrair todos os 22 painéis (Gemini por defeito)
+# Extract all 22 panels (Gemini by default)
 ./scripts/pipeline extract-geometry
 
-# Provider específico
+# Specific provider
 ./scripts/pipeline extract-geometry --provider claude
 
-# Só alguns painéis
+# Only some panels
 ./scripts/pipeline extract-geometry --panels PG02K,PCT01K
 
-# Re-extrair (overwrite) painéis já no parquet
+# Re-extract (overwrite) panels already in the parquet
 ./scripts/pipeline extract-geometry --overwrite
 ```
 
-## Schema de saída — `panel_geometry.parquet`
+## Output schema — `panel_geometry.parquet`
 
-Definido em `src/pipeline/extraction/schema.py`. 25 colunas (4 chaves de junção + 21 features):
+Defined in `src/pipeline/extraction/schema.py`. 25 columns (4 join keys + 21
+features):
 
-**Chaves:** `panel_id`, `is_id`, `project_id`, `drawing_revision`
+**Keys:** `panel_id`, `is_id`, `project_id`, `drawing_revision`
 
-**Estrutura metálica (10):** `largura_painel_mm`, `altura_painel_mm`, `profundidade_painel_mm`, `largura_perfil_mm`, `espessura_perfil_mm`, `num_montantes`, `num_raias`, `comprimento_montante_mm`, `comprimento_raia_mm`, `num_furos_raia`
+**Metal structure (10):** `largura_painel_mm`, `altura_painel_mm`,
+`profundidade_painel_mm`, `largura_perfil_mm`, `espessura_perfil_mm`,
+`num_montantes`, `num_raias`, `comprimento_montante_mm`, `comprimento_raia_mm`,
+`num_furos_raia`
 
-**Placagem (6):** `num_placas_por_face`, `perimetro_placa_total_mm`, `perimetro_placa_maior_mm`, `espessura_placa_mm`, `placagem_dupla`, `tem_entalhes`
+**Boarding (6):** `num_placas_por_face`, `perimetro_placa_total_mm`,
+`perimetro_placa_maior_mm`, `espessura_placa_mm`, `placagem_dupla`, `tem_entalhes`
 
-**Arquétipo (5):** `codigo_painel`, `e_tecto`, `e_pavimento`, `e_porta`, `e_zona_humida`
+**Archetype (5):** `codigo_painel`, `e_tecto`, `e_pavimento`, `e_porta`,
+`e_zona_humida`
 
-Junta-se com `ecociaf_times_long.parquet` em `panel_id` para produzir a `training_clean.parquet`.
+> The feature column names are kept in Portuguese because they match the dataset
+> columns the model trains on; renaming them would break the join. UI labels are
+> English (see `MICRO_OP_NAMES` in `estimate.py`).
+
+It joins with `ecociaf_times_long.parquet` on `panel_id` to produce the training
+tables.

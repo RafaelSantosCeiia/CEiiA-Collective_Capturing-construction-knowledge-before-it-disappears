@@ -77,5 +77,5 @@ def clean_observations(
         cols = ["panel_id", "micro_op_num", "observation_id", "source",
                 "duration_sec", "median_da_tarefa"]
         removed[[c for c in cols if c in removed.columns]].to_csv(log_path, index=False)
-    print(f"  limpeza: {len(d)} → {len(kept)} obs ({len(removed)} removidas, log → {log_path})")
+    print(f"  cleaning: {len(d)} → {len(kept)} obs ({len(removed)} removed, log → {log_path})")
     return kept

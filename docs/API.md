@@ -1,52 +1,53 @@
-# API HTTP — contrato para o frontend e n8n
+# HTTP API — contract for the frontend and n8n
 
-Envolve o pipeline de previsão e o retreino. O que a API devolve nas previsões é
-exatamente o que o CLI `predict-drawing` produz.
+Wraps the prediction pipeline and retraining. What the API returns for
+predictions is exactly what the `predict-drawing` CLI produces.
 
-## Arrancar
+## Start
 
 ```bash
 pip install -r requirements.txt
-export GEMINI_API_KEY=...      # ou põe no .env (carregado automaticamente)
+export GEMINI_API_KEY=...      # or put it in .env (loaded automatically)
 PYTHONPATH=src python -m uvicorn pipeline.api:app --host 127.0.0.1 --port 8000
 ```
 
-Docs interativos (Swagger) em `http://<host>:<port>/docs`.
+Interactive docs (Swagger) at `http://<host>:<port>/docs`.
 
-## Autenticação (opcional)
+## Authentication (optional)
 
-Controlada pela variável `API_KEY` no `.env`:
+Controlled by the `API_KEY` variable in `.env`:
 
-- **`API_KEY` vazio** → sem auth (uso local).
-- **`API_KEY` preenchido** → todos os endpoints (exceto `/health`) exigem o header
-  `X-API-Key: <valor>`. Usa isto **sempre que expões a API por túnel** (cloudflared/ngrok),
-  porque os dados são confidenciais (Casais).
+- **`API_KEY` empty** → no auth (local use).
+- **`API_KEY` set** → all endpoints (except `/health`) require the
+  `X-API-Key: <value>` header. Use this **whenever you expose the API over a
+  tunnel** (cloudflared/ngrok), because the data is confidential (Casais).
 
 ```bash
-curl -H "X-API-Key: <a-tua-chave>" http://127.0.0.1:8000/model
+curl -H "X-API-Key: <your-key>" http://127.0.0.1:8000/model
 ```
 
-No frontend a chave é guardada no browser (localStorage `blufab_api_key`); no n8n
-adiciona o header `X-API-Key` em cada nó HTTP Request (ou uma credencial Header Auth).
+In the frontend the key is stored in the browser (localStorage `blufab_api_key`);
+in n8n add the `X-API-Key` header to each HTTP Request node (or a Header Auth
+credential).
 
 ## Endpoints
 
-| Método | Rota | Para quê |
+| Method | Route | Purpose |
 |---|---|---|
-| GET | `/health` | liveness (sem auth) |
-| GET | `/model` | metadados do campeão (confiança na UI) |
-| GET | `/metrics` | métricas longitudinais (learning curve, calibração, projeção) |
-| POST | `/predict/pdf` | upload de PDF → previsão (forma do frontend) |
-| POST | `/predict` | previsão por código de painel já em cache (`{key}`) |
-| POST | `/predict-drawing` | upload de PDF → previsão (forma crua, igual ao CLI) |
-| POST | `/retrain` (alias `/train`) | arranca um retreino assíncrono → `job_id` |
-| GET | `/retrain/{job_id}` | estado de um job (poll) |
-| GET | `/retrain/log` | histórico dos retreinos |
-| GET | `/schedule` | próximo retreino automático |
-| POST | `/schedule` | regista o agendamento (aceita `cron`) |
-| GET | `/future/models` | **[demo]** metadados dos 4 modelos da *Visão de Futuro* |
-| POST | `/future/predict` | **[demo]** previsão *futuro* por código de painel (`{key}`) |
-| POST | `/future/predict/pdf` | **[demo]** previsão *futuro* por upload de PDF |
+| GET | `/health` | liveness (no auth) |
+| GET | `/model` | champion metadata (UI confidence) |
+| GET | `/metrics` | longitudinal metrics (learning curve, calibration, projection) |
+| POST | `/predict/pdf` | PDF upload → prediction (frontend shape) |
+| POST | `/predict` | prediction by panel code already in cache (`{key}`) |
+| POST | `/predict-drawing` | PDF upload → prediction (raw shape, same as CLI) |
+| POST | `/retrain` (alias `/train`) | starts an async retrain → `job_id` |
+| GET | `/retrain/{job_id}` | job status (poll) |
+| GET | `/retrain/log` | retrain history |
+| GET | `/schedule` | next automatic retrain |
+| POST | `/schedule` | registers the schedule (accepts `cron`) |
+| GET | `/future/models` | **[demo]** metadata of the 4 *Future Vision* models |
+| POST | `/future/predict` | **[demo]** *future* prediction by panel code (`{key}`) |
+| POST | `/future/predict/pdf` | **[demo]** *future* prediction by PDF upload |
 
 ---
 
@@ -63,27 +64,28 @@ adiciona o header `X-API-Key` em cada nó HTTP Request (ou uma credencial Header
   "features": ["largura_painel_mm", "..."]
 }
 ```
-Usa o `conformal_coverage` para mostrar "intervalo 80% → cobre 83% (calibrado)".
+Use `conformal_coverage` to show "80% interval → covers 83% (calibrated)".
 
 ### `GET /metrics`
-Lê `data/training/metrics.json` (gerado pelo `train`). Contém `noise_floor`,
-`history` (MAE + cobertura por nº de painéis) e `projection` (extrapolação).
-`404` se ainda não houver métricas → corre `pipeline train`.
+Reads `data/training/metrics.json` (produced by `train`). Contains `noise_floor`,
+`history` (MAE + coverage by number of panels) and `projection` (extrapolation).
+`404` if there are no metrics yet → run `pipeline train`.
 
 ### `POST /predict/pdf`
-`multipart/form-data` com `file` (PDF). Query: `provider` (`gemini`|`cache`|`claude`|`ollama`),
-`level` (`q80`|`q90`). Devolve a forma do frontend: `{key, predictions[], total_sec,
-total_lo_sec, total_hi_sec, panels[], extracted, warnings}`.
+`multipart/form-data` with `file` (PDF). Query: `provider`
+(`gemini`|`cache`|`claude`|`ollama`), `level` (`q80`|`q90`). Returns the frontend
+shape: `{key, predictions[], total_sec, total_lo_sec, total_hi_sec, panels[],
+extracted, warnings}`.
 
 ### `POST /predict`
-Previsão rápida por código de painel já presente na cache de geometria.
+Fast prediction by a panel code already present in the geometry cache.
 ```json
 { "key": "PG02K", "level": "q80" }
 ```
-`404` se o painel não estiver em cache (usa `/predict/pdf`).
+`404` if the panel is not in cache (use `/predict/pdf`).
 
 ### `POST /predict-drawing`
-`multipart/form-data` com `file` (PDF). Query: `provider`, `level`. Forma crua:
+`multipart/form-data` with `file` (PDF). Query: `provider`, `level`. Raw shape:
 
 ```bash
 curl -F "file=@ISCTE_PG01K.pdf" \
@@ -97,7 +99,7 @@ curl -F "file=@ISCTE_PG01K.pdf" \
     {
       "panel_id": "PG01K", "total_sec": 383.0, "total_lo_sec": 62.0, "total_hi_sec": 760.0,
       "micro_ops": [
-        {"micro_op_num": 1, "micro_op_name": "Pegar nos perfis",
+        {"micro_op_num": 1, "micro_op_name": "Pick profiles",
          "point_sec": 20.2, "lo_sec": 5.4, "hi_sec": 34.9}
       ]
     }
@@ -105,18 +107,23 @@ curl -F "file=@ISCTE_PG01K.pdf" \
   "panels_without_geometry": []
 }
 ```
-Tempos em **segundos**. `lo_sec`/`hi_sec` = intervalo conformal calibrado.
-Total do painel = soma das micro-ops; total do projeto = soma dos painéis.
+Times in **seconds**. `lo_sec`/`hi_sec` = calibrated conformal interval. Panel
+total = sum of the micro-ops; project total = sum of the panels.
+
+> With `provider=gemini`, live extraction is attempted first; if the provider is
+> unavailable it falls back to the cached geometry. Panels with no geometry
+> (neither live nor cached) are listed in `panels_without_geometry`.
 
 ---
 
-## Retreino (assíncrono) — fluxo n8n
+## Retraining (async) — n8n flow
 
-`POST /retrain` arranca um job em background e devolve já o `job_id`. O retreino real
-demora ~30 min; faz-se **poll** a `GET /retrain/{job_id}` até o `status` ser terminal.
+`POST /retrain` starts a background job and returns the `job_id` immediately. A
+real retrain takes ~30 min; **poll** `GET /retrain/{job_id}` until `status` is
+terminal.
 
-### `POST /retrain` (ou `/train`)
-Body (tudo opcional):
+### `POST /retrain` (or `/train`)
+Body (all optional):
 ```json
 {
   "dry_run": true,
@@ -126,12 +133,13 @@ Body (tudo opcional):
   "require_improvement": true
 }
 ```
-- **`dry_run`** — simula sem treinar (para testar o fluxo). `dry_run_outcome` =
-  `deployed` | `rejected` | `failed`; `dry_run_seconds` = 1–120.
-- **Retreino real** (`dry_run` ausente/false): `trials` (Optuna), `require_improvement`
-  (gate de segurança). Só corre **um** de cada vez (2.º pedido → `409`).
+- **`dry_run`** — simulates without training (to test the flow). `dry_run_outcome`
+  = `deployed` | `rejected` | `failed`; `dry_run_seconds` = 1–120.
+- **Real retrain** (`dry_run` absent/false): `trials` (Optuna),
+  `require_improvement` (safety gate). Only **one** runs at a time (2nd request →
+  `409`).
 
-Resposta imediata:
+Immediate response:
 ```json
 { "job_id": "job_xxxx", "status": "running", "deployed": null, "started_at": "...", "params": {...} }
 ```
@@ -146,68 +154,70 @@ Resposta imediata:
   "train_report": {"model_name": "catboost", "mae": 16.5}
 }
 ```
-Em falha: `status: "failed"`, `error`, `stderr_tail`.
+On failure: `status: "failed"`, `error`, `stderr_tail`.
 
 ### `GET /retrain/log?limit=20`
 ```json
 { "items": [ { "job_id": "...", "status": "deployed", "train_report": {"mae": 15.6, "model_name": "catboost"},
               "prior_mae": 16.5, "improvement_pct": 5.3 } ], "count": 1 }
 ```
-Inclui jobs em memória ainda a correr. Persistido em `data/training/retrain_jobs.json`.
-Cada job deployado é anotado com `prior_mae` (MAE do deploy anterior) e
-`improvement_pct` (> 0 = erro mais baixo, melhor) — usado na coluna *Change* do
-histórico para mostrar "o que mudou".
+Includes in-memory jobs still running. Persisted in
+`data/training/retrain_jobs.json`. Each deployed job is annotated with `prior_mae`
+(the previous deploy's MAE) and `improvement_pct` (> 0 = lower error, better) —
+used by the History tab's *Change* column to show "what changed".
 
-### Exemplo de workflow n8n
-1. **Start Retrain** — `POST {base}/retrain` com o body acima → guarda `job_id`.
-2. **Wait** (ex. 30s).
+### n8n workflow example
+1. **Start Retrain** — `POST {base}/retrain` with the body above → store `job_id`.
+2. **Wait** (e.g. 30s).
 3. **Poll Status** — `GET {base}/retrain/{{ $('Start Retrain').item.json.job_id }}`.
-4. **IF** `status == "running"` → volta ao Wait; senão ramifica por `deployed`/`rejected`/`failed`.
+4. **IF** `status == "running"` → back to Wait; otherwise branch on
+   `deployed`/`rejected`/`failed`.
 
-> Em cada nó HTTP Request: se a API tiver `API_KEY`, adiciona o header `X-API-Key`;
-> caso contrário, `Authentication = None`.
+> In each HTTP Request node: if the API has `API_KEY`, add the `X-API-Key` header;
+> otherwise, `Authentication = None`.
 
 ---
 
-## Agendamento
+## Scheduling
 
 ### `GET /schedule`
-Próxima execução automática. Lê `data/training/schedule.json` (recalcula a partir do
-cron guardado, por isso nunca fica obsoleto); se não existir, devolve o mensal default.
+Next automatic run. Reads `data/training/schedule.json` (recomputed from the
+stored cron, so it never goes stale); if absent, returns the monthly default.
 ```json
 { "next_run_utc": "2026-06-01T03:00:00+00:00", "cron": "0 3 1 * *",
   "cadence": "monthly", "source": "overnight retrain (n8n)", "timezone": "UTC" }
 ```
 
 ### `POST /schedule`
-Regista o agendamento. Aceita **`cron`** (5 campos — calcula a próxima execução) e/ou
-**`next_run_utc`** (ISO 8601 explícito):
+Registers the schedule. Accepts **`cron`** (5 fields — computes the next run)
+and/or **`next_run_utc`** (explicit ISO 8601):
 ```json
 { "cron": "0 0 1 * *", "source": "n8n" }
 ```
-`422` se não enviares nem `cron` (válido, 5 campos) nem `next_run_utc`.
+`422` if you send neither a valid `cron` (5 fields) nor `next_run_utc`.
 
 ---
 
-## Visão de Futuro (demo — dados FICTÍCIOS)
+## Future Vision (demo — FICTITIOUS data)
 
-Subsistema paralelo que ilustra padrões que dados mais ricos desbloqueariam (ver §6
-do README). **Não** usa o modelo real; serve os 4 modelos sintéticos de
-`data/training/future/` (gerados por `pipeline future-build`).
+A parallel subsystem that illustrates patterns richer data would unlock (see §6 of
+the README). It does **not** use the real model; it serves the 4 synthetic models
+from `data/training/future/` (generated by `pipeline future-build`).
 
 ### `GET /future/models`
-Metadados dos 4 modelos: `[{name, champion, lopo_mae, noise_floor_mae, extra_cols, n_train_obs}]`.
+Metadata of the 4 models: `[{name, champion, lopo_mae, noise_floor_mae,
+extra_cols, n_train_obs}]`.
 
 ### `POST /future/predict`
-Previsão por código de painel em cache. Body: `{ "key": "PG02K", "level": "q80" }`.
-Devolve a previsão central (`general`, com breakdown produtivo/desperdício) e os
-cenários (`temperature`, `experience`, `timeofday`), cada um com `scenarios`
-(cartões de destaque) e `curve` (grelha fina para o gráfico):
+Prediction by a cached panel code. Body: `{ "key": "PG02K", "level": "q80" }`.
+Returns the central prediction (`general`, with a productive/waste breakdown) and
+the scenarios (`temperature`, `experience`, `timeofday`), each with `scenarios`
+(highlight cards) and `curve` (fine grid for the chart):
 ```json
 {
   "panel_id": "PG02K", "interval_level": "q80", "n_panels": 1,
   "general": {
-    "items": [{"micro_op_num": 1, "micro_op_name": "Pegar nos perfis",
+    "items": [{"micro_op_num": 1, "micro_op_name": "Pick profiles",
                "point_sec": 14.0, "lo_sec": 10.1, "hi_sec": 17.9}, "..."],
     "total_sec": 599.8,
     "breakdown": {"productive_pct": 75.6, "idle_no_value_pct": 13.0, "material_necessary_pct": 11.4, "...": "..."}
@@ -222,15 +232,16 @@ cenários (`temperature`, `experience`, `timeofday`), cada um com `scenarios`
 ```
 
 ### `POST /future/predict/pdf`
-`multipart/form-data` com `file` (PDF de processo). Query: `level` (`q80`|`q90`).
-A geometria vem da cache; em PDFs multi-painel agrega os sub-painéis (`n_panels`,
-`panel_ids`, `panels_without_geometry`). Mesma forma de resposta do endpoint acima.
+`multipart/form-data` with `file` (process PDF). Query: `level` (`q80`|`q90`).
+Geometry comes from the cache; for multi-panel PDFs it aggregates the sub-panels
+(`n_panels`, `panel_ids`, `panels_without_geometry`). Same response shape as the
+endpoint above.
 
 ---
 
-## Códigos de erro
-- `401` — `X-API-Key` em falta ou inválido (quando `API_KEY` está definido)
-- `409` — já há um retreino a correr
-- `415` — ficheiro não é `.pdf`
-- `422` — sem geometria / parâmetros inválidos
-- `503` — sem modelo deployado (corre `pipeline train`)
+## Error codes
+- `401` — `X-API-Key` missing or invalid (when `API_KEY` is set)
+- `409` — a retrain is already running
+- `415` — file is not a `.pdf`
+- `422` — no geometry / invalid parameters
+- `503` — no deployed model (run `pipeline train`)

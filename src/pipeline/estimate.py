@@ -69,7 +69,7 @@ def load_data(train_dir: Path = Path("data/training"), clean: bool = False,
         hold = {h.strip().upper() for h in holdout}
         before = d[GROUP].nunique()
         d = d[~d[GROUP].str.upper().isin(hold)].reset_index(drop=True)
-        print(f"  holdout: excluídos {sorted(hold)} → {d[GROUP].nunique()}/{before} painéis no treino")
+        print(f"  holdout: excluded {sorted(hold)} → {d[GROUP].nunique()}/{before} panels in training")
     if clean:
         from .training_table import clean_observations
         d = clean_observations(d)

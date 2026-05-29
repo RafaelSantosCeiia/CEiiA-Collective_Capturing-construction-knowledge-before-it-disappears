@@ -50,7 +50,7 @@ def _geometry_live(chunk, provider: str) -> dict | None:
         return None
     res = extractor.extract(chunk)
     if res.error or res.geometry is None:
-        print(f"    ⚠️  {chunk.panel_id}: extração falhou ({res.error})")
+        print(f"    ⚠️  {chunk.panel_id}: extraction failed ({res.error})")
         return None
     return res.geometry.model_dump()
 
@@ -101,17 +101,17 @@ def predict_drawing(
 
 def print_prediction(out: dict) -> None:
     lvl = out.get("interval_level", "q90").replace("q", "") + "%"
-    print(f"\n{'='*64}\n PROJETO {out['project_id']}  ·  modelo: {out['champion']}  "
-          f"·  intervalo {lvl}\n{'='*64}")
+    print(f"\n{'='*64}\n PROJECT {out['project_id']}  ·  model: {out['champion']}  "
+          f"·  interval {lvl}\n{'='*64}")
     for p in out["panels"]:
-        print(f"\n ▸ Painel {p['panel_id']}  —  {p['total_sec']:.0f}s "
+        print(f"\n ▸ Panel {p['panel_id']}  —  {p['total_sec']:.0f}s "
               f"[{p['total_lo_sec']:.0f}–{p['total_hi_sec']:.0f}]")
         for it in p["micro_ops"]:
             print(f"     op{it['micro_op_num']:>2} {it['micro_op_name']:24} "
                   f"{it['point_sec']:6.0f}s  [{it['lo_sec']:.0f}–{it['hi_sec']:.0f}]")
     print(f"\n{'─'*64}")
-    print(f" TOTAL DO PROJETO: {out['project_total_sec']:.0f}s "
+    print(f" PROJECT TOTAL: {out['project_total_sec']:.0f}s "
           f"[{out['project_total_lo_sec']:.0f}–{out['project_total_hi_sec']:.0f}]  "
           f"(~{out['project_total_sec']/60:.0f} min)")
     if out["panels_without_geometry"]:
-        print(f" ⚠️  sem geometria (não extraídos): {out['panels_without_geometry']}")
+        print(f" ⚠️  no geometry (not extracted): {out['panels_without_geometry']}")
