@@ -2655,6 +2655,7 @@ function HistoryTab({ server, reloadKey }) {
   const [loading, setLoading] = useStateE(true);
   const [error, setError] = useStateE(null);
   const [items, setItems] = useStateE([]);
+  const [detail, setDetail] = useStateE(null);  // job shown in the detail modal
 
   async function load() {
     setLoading(true);setError(null);
@@ -2670,12 +2671,12 @@ function HistoryTab({ server, reloadKey }) {
   return (
     <div>
       <PageHeader
-        title="History"
-        subtitle="The most recent 20 retrain jobs and their outcomes."
-        tooltip="Every time we taught the program new tricks shows up here."
+        title="Retrain history"
+        subtitle="The most recent 20 retrain jobs, what each one changed, and whether it was kept."
+        tooltip="Every time the model was retrained on newer data shows up here."
         about={
           <p>
-            A log of every time the program has been taught new tricks. Each row shows <span className="font-medium text-[var(--text)]">when</span> the training ran, which <span className="font-medium text-[var(--text)]">version</span> was tried, how accurate it turned out, and whether we <span className="font-medium text-[var(--text)]">kept it</span>.
+            A log of every <span className="font-medium text-[var(--text)]">model retrain</span> (not predictions). Each row shows <span className="font-medium text-[var(--text)]">when</span> it ran, the model version, its accuracy (MAE), <span className="font-medium text-[var(--text)]">how it changed</span> vs the previous deploy, and whether we <span className="font-medium text-[var(--text)]">kept it</span>. Click a row for full detail.
           </p>
         }
         action={<Button variant="secondary" onClick={load} loading={loading} icon={<I.Refresh size={15} />}>Refresh</Button>} />
@@ -2719,6 +2720,12 @@ function HistoryTab({ server, reloadKey }) {
                       <HelpTip label="MAE — Mean Absolute Error" text="Mean Absolute Error. On average, how many seconds off the program's estimates were from real measurements. Smaller is better." />
                     </span>
                   </th>
+                  <th className="px-6 py-3 text-right w-36">
+                    <span className="inline-flex items-center gap-1.5 justify-end w-full">
+                      Change
+                      <HelpTip label="What changed" text="How this deploy's accuracy compares to the previous one. Green = error went down (better); red = error went up." />
+                    </span>
+                  </th>
                   <th className="px-6 py-3 w-40">
                     <span className="inline-flex items-center gap-1.5">
                       Outcome
@@ -2736,20 +2743,33 @@ function HistoryTab({ server, reloadKey }) {
                 const when = it.finished_at || it.started_at;
                 const mae = it?.train_report?.mae ?? it?.train_report?.MAE ?? it.mae;
                 const modelName = it?.train_report?.model_name || it.model_name || it.model || "—";
+                const simulated = /simulated/i.test(String(modelName)) || it?.params?.dry_run === true;
+                const imp = typeof it.improvement_pct === "number" ? it.improvement_pct : null;
                 let badge;
                 if (failed) badge = <Badge tone="err" icon={<I.Octagon size={11} />}>Failed</Badge>;else
                 if (deployed) badge = <Badge tone="ok" icon={<I.BadgeCheck size={11} />}>Deployed</Badge>;else
                 if (rejected) badge = <Badge tone="warn" icon={<I.Shield size={11} />}>Rejected</Badge>;else
                 badge = <Badge tone="slate" icon={<I.Loader size={11} />}>{it.status || "Pending"}</Badge>;
                 return (
-                  <tr key={(it.job_id || it.id || i) + "-" + i} className="border-b border-[var(--border-soft)] last:border-b-0 hover:bg-[var(--surface-2)]/50 transition-colors">
+                  <tr key={(it.job_id || it.id || i) + "-" + i} onClick={() => setDetail(it)}
+                      className={"border-b border-[var(--border-soft)] last:border-b-0 hover:bg-[var(--surface-2)]/50 transition-colors cursor-pointer " + (simulated ? "opacity-60" : "")}>
                       <td className="px-6 py-3">
                         <div className="font-mono tabular-nums text-[var(--text)]">{eFormatAbs(when)}</div>
                         <div className="text-[11.5px] text-[var(--text-faint)] mt-0.5">{eTimeAgo(when)}</div>
                       </td>
-                      <td className="px-6 py-3 font-mono text-[var(--text-muted)] truncate max-w-[260px]">{modelName}</td>
+                      <td className="px-6 py-3 font-mono text-[var(--text-muted)] truncate max-w-[260px]">
+                        {modelName}
+                        {simulated && <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-[var(--border)] text-[var(--text-faint)] not-italic">Simulated</span>}
+                      </td>
                       <td className="px-6 py-3 font-mono tabular-nums text-right text-[var(--text)]">
                         {mae != null ? typeof mae === "number" ? mae.toFixed(3) : String(mae) : "—"}
+                      </td>
+                      <td className="px-6 py-3 text-right tabular-nums">
+                        {imp != null ? (
+                          <span className="inline-flex items-center gap-1 font-medium" style={{ color: imp >= 0 ? "var(--ok)" : "var(--err)" }}>
+                            {imp >= 0 ? "▼" : "▲"} {Math.abs(imp).toFixed(1)}%
+                          </span>
+                        ) : <span className="text-[var(--text-faint)]">—</span>}
                       </td>
                       <td className="px-6 py-3">{badge}</td>
                     </tr>);
@@ -2760,8 +2780,47 @@ function HistoryTab({ server, reloadKey }) {
           </div>
         }
       </Card>
+
+      <RetrainDetailModal job={detail} onClose={() => setDetail(null)} />
     </div>);
 
+}
+
+function RetrainDetailModal({ job, onClose }) {
+  if (!job) return null;
+  const tr = job.train_report || {};
+  const mae = tr.mae ?? job.mae;
+  const imp = typeof job.improvement_pct === "number" ? job.improvement_pct : null;
+  const rows = [
+    ["Job ID", job.job_id || "—"],
+    ["Status", job.status || "—"],
+    ["Model", tr.model_name || job.model_name || "—"],
+    ["MAE", mae != null ? (typeof mae === "number" ? mae.toFixed(3) + "s" : String(mae)) : "—"],
+    ["Previous MAE", typeof job.prior_mae === "number" ? job.prior_mae.toFixed(3) + "s" : "—"],
+    ["Change vs previous", imp != null ? (imp >= 0 ? "−" : "+") + Math.abs(imp).toFixed(1) + "% error" : "—"],
+    ["Started", job.started_at ? eFormatAbs(job.started_at) : "—"],
+    ["Finished", job.finished_at ? eFormatAbs(job.finished_at) : "—"],
+    ["Trials", job.params && job.params.trials != null ? String(job.params.trials) : "—"],
+    ["Simulated", (job.params && job.params.dry_run) || /simulated/i.test(String(tr.model_name)) ? "yes" : "no"],
+  ];
+  return (
+    <Modal open={!!job} onClose={onClose} maxWidth="max-w-lg">
+      <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between">
+        <div className="text-[14px] font-semibold text-[var(--text)] inline-flex items-center gap-2"><I.History size={16} /> Retrain detail</div>
+        <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)]"><I.X size={16} /></button>
+      </div>
+      <div className="px-5 py-4 space-y-1.5 max-h-[70vh] overflow-auto">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-baseline justify-between gap-4 text-[13px]">
+            <span className="text-[var(--text-muted)]">{k}</span>
+            <span className="font-mono tabular-nums text-[var(--text)] text-right">{v}</span>
+          </div>
+        ))}
+        {job.error && <PreBlock label="Error" content={String(job.error)} />}
+        {job.stderr_tail && <PreBlock label="stderr" content={String(job.stderr_tail)} max />}
+        {job.stdout_tail && <PreBlock label="stdout" content={String(job.stdout_tail)} max />}
+      </div>
+    </Modal>);
 }
 
 /* ============================================================
