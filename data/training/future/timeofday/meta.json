@@ -1,0 +1,81 @@
+{
+  "name": "timeofday",
+  "champion": "catboost",
+  "extra_cols": [
+    "hora_do_dia"
+  ],
+  "design_cols": [
+    "largura_painel_mm",
+    "altura_painel_mm",
+    "profundidade_painel_mm",
+    "largura_perfil_mm",
+    "espessura_perfil_mm",
+    "num_montantes",
+    "num_raias",
+    "comprimento_montante_mm",
+    "comprimento_raia_mm",
+    "num_furos_raia",
+    "num_placas_por_face",
+    "perimetro_placa_total_mm",
+    "perimetro_placa_maior_mm",
+    "espessura_placa_mm",
+    "hora_do_dia",
+    "micro_op_num_1",
+    "micro_op_num_2",
+    "micro_op_num_3",
+    "micro_op_num_4",
+    "micro_op_num_5",
+    "micro_op_num_6",
+    "micro_op_num_7",
+    "micro_op_num_8",
+    "micro_op_num_9",
+    "micro_op_num_10",
+    "micro_op_num_11",
+    "micro_op_num_12",
+    "micro_op_num_13",
+    "micro_op_num_14"
+  ],
+  "conformal": {
+    "q80": {
+      "__global__": 0.3166602125217735,
+      "1": 0.29637234212647573,
+      "2": 0.3119533142399797,
+      "3": 0.3217325920730942,
+      "4": 0.3172693013717419,
+      "5": 0.30477123103290027,
+      "6": 0.3276526581953287,
+      "7": 0.3436925245505627,
+      "8": 0.35739531659453233,
+      "9": 0.31309183224625703,
+      "10": 0.3543352819619863,
+      "11": 0.3084212087556962,
+      "12": 0.2983255931550366,
+      "13": 0.300836345651198,
+      "14": 0.34672662344062666
+    },
+    "q90": {
+      "__global__": 0.44594207393864477,
+      "1": 0.4682647097667139,
+      "2": 0.4615358524647099,
+      "3": 0.4689827709176745,
+      "4": 0.4452371843304221,
+      "5": 0.42242969174245265,
+      "6": 0.44192314909993197,
+      "7": 0.4739817563432135,
+      "8": 0.44403833291856654,
+      "9": 0.41118712807071756,
+      "10": 0.49786561471124924,
+      "11": 0.4606822616068393,
+      "12": 0.4452127748600648,
+      "13": 0.43452112829866363,
+      "14": 0.4681601767080082
+    }
+  },
+  "noise_floor": {
+    "mae": 6.134322820037105,
+    "cv_median_pct": 22.516786336916912,
+    "n_pairs": 3528
+  },
+  "lopo_mae": 6.396301885456694,
+  "n_train_obs": 3528
+}

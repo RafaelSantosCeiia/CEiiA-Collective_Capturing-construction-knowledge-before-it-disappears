@@ -59,6 +59,7 @@ export GEMINI_API_KEY="..."
 | `evaluate` | scorecard LOPO: piso de ruído humano vs baselines vs modelo (sem deploy) |
 | `predict-drawing <pdf>` | estima tempos por micro-op, painel e projeto, com intervalo |
 | `parse-times` | re-parsear os Excels de tempos PICUA + ECOCIAF |
+| `future-build` | **[demo · dados fictícios]** gera os datasets sintéticos + treina os 4 modelos da *Visão de Futuro* (ver §6) |
 
 Flags úteis: `train --no-clean` (treina com dados crus), `train --no-gate`
 (deploy sem champion-gate), `predict-drawing --provider gemini` (extração live).
@@ -76,7 +77,9 @@ python -m http.server 5500 -d frontend     # http://127.0.0.1:5500
 Páginas do frontend: **Live Dashboard** (mock de chão de fábrica, dados simulados),
 **Predictor** (PDF → previsão por painel/micro-op + export PDF/CSV), **Model Metrics**
 (curva de aprendizagem e calibração ao longo do tempo), **Training** e **History**
-(retreino manual + agendamento).
+(retreino manual + agendamento). O botão **Future Vision** (barra de topo) abre uma
+página à parte — a demonstração de §6 (dados fictícios). As previsões/estados
+persistem ao trocar de separador (cache em memória).
 
 Para n8n / exposição pública: define `API_KEY` no `.env` (ativa o header `X-API-Key`)
 e abre um túnel (`cloudflared tunnel --url http://127.0.0.1:8000` ou `ngrok http 8000`).
@@ -125,6 +128,7 @@ o **piso de ruído humano** (leave-one-observation-out):
 | Mapeamento das micro-ops de observadores diferentes p/ 14 canónicas | **Heurístico** (ver `picua_times.py`) |
 | Captura por vídeo (deteção de transições) | **Não implementado** — *integração desenhada*, ver §5 |
 | AutoGluon no benchmark | **Opcional** (entra se instalado; não bloqueia) |
+| Página *Visão de Futuro* (4 modelos: desperdício, temperatura, experiência, hora) | **Demonstrativo** — **dados fictícios**; ilustra padrões que dados mais ricos desbloqueariam, **não** são resultados reais (ver §6) |
 
 ---
 
@@ -150,20 +154,59 @@ a jusante** — modelo, retreino e previsão ficam iguais. Mais dados `source:"c
 
 ---
 
-## 6. Estrutura
+## 6. Visão de futuro — o que dados mais ricos desbloqueiam (dados FICTÍCIOS)
+
+A §5 explica como a captura por vídeo alimenta o mesmo event-log com muito mais
+dados. Esta página é uma **demonstração interativa** desse futuro: com **dados
+fictícios** — gerados a partir da geometria *real* dos painéis, para os tempos
+fazerem sentido (painel maior → mais tempo) — mostramos os padrões acionáveis que
+mais medições permitiriam descobrir, e que o modelo atual (10 painéis) não vê.
+
+Quatro modelos sintéticos (CatBoost, com a **mesma avaliação honesta** do pipeline
+real — LOPO + intervalos conformais):
+
+| Modelo | O que demonstra |
+|---|---|
+| **General** | separa trabalho produtivo de dois tipos de desperdício: *idle sem valor* (aleatório → intervalo largo, imprevisível) vs *deslocação por material* (sistemático → intervalo estreito, **alvo claro de otimização** de processo) |
+| **Temperature** | produtividade vs temperatura ambiente — ótima a ~20°C, muito pior no calor que no frio |
+| **Experience** | operários com mais experiência são mais rápidos, de forma consistente |
+| **Time of day** | quebra de produtividade após o almoço e ao fim do dia |
+
+```bash
+./scripts/pipeline future-build      # gera os datasets sintéticos + treina os 4 modelos
+```
+
+No frontend, o botão **Future Vision** abre uma página à parte (fora da barra
+lateral): a previsão central pelo modelo *general* (com o breakdown de desperdício)
+e, por baixo, **curvas de cenário** que mostram como temperatura, experiência e hora
+do dia movem o tempo. Subsistema **100% paralelo** — vive em `src/pipeline/future/`
+e `data/training/future/`, com endpoints próprios (`/future/*`), e **não toca** no
+pipeline/modelo real.
+
+> **Importante para o júri:** esta secção usa **dados inventados** para ilustrar o
+> *valor* de dados mais ricos — é uma prova de conceito do feedback loop da §5, não
+> resultados reais.
+
+---
+
+## 7. Estrutura
 
 ```
 src/pipeline/
-  cli.py              # Typer CLI (6 comandos)
+  cli.py              # Typer CLI (extract/build/train/evaluate/predict/parse + future-build)
   extraction/         # PDF → 21 features (Gemini/Claude/Ollama, schema Pydantic)
   picua_times.py      # Excels de tempos → 14 micro-ops canónicas
   training_table.py   # tempos ⨝ geometria + limpeza de outliers
   estimate.py         # features, piso de ruído, intervalos, previsão por painel
   modeling.py         # benchmark multi-modelo + champion-gate + deploy
   predict_drawing.py  # PDF → previsão por micro-op/painel/projeto
+  api.py              # API HTTP (FastAPI) — pipeline + retreino + /future/*
+  future/             # [demo] visão de futuro: dados sintéticos + 4 modelos (§6)
 data/
   raw/                # PDFs, BOMs, Excels (dados Casais — NÃO versionar publicamente)
   training/           # parquets long, geometria, modelo, scorecard
+  training/future/    # [demo] datasets sintéticos + 4 modelos da Visão de Futuro
+frontend/             # React in-browser (sem build): Predictor, Metrics, …, Future Vision
 ```
 
 **Retreino noturno mensal:** `./scripts/pipeline train --trials 80` corre o
@@ -172,7 +215,7 @@ automático. Pensado para correr de madrugada (custo de compute irrelevante).
 
 ---
 
-## 7. Confidencialidade
+## 8. Confidencialidade
 
 Os dados em `data/raw/` são da Casais/BluFab e não devem ser expostos em demos
 públicas, publicações, ou reutilizados fora do âmbito do evento.

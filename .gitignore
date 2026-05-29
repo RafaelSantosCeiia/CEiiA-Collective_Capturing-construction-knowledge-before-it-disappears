@@ -13,6 +13,9 @@ catboost_info/
 # sistema
 .DS_Store
 
+# config local do editor/agente
+.claude/settings.local.json
+
 # uploads runtime do frontend
 frontend/uploads/
 frontend/apikey.js

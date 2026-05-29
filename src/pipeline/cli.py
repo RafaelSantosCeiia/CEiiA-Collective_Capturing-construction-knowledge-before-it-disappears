@@ -113,6 +113,36 @@ def predict_drawing_cmd(
         console.print(f"[green]→[/green] {output}")
 
 
+@app.command("future-build")
+def future_build_cmd():
+    """[Visão de futuro · dados FICTÍCIOS] Gera os 4 datasets sintéticos + treina os modelos.
+
+    Demonstra padrões acionáveis (desperdício, temperatura, experiência, hora do dia)
+    que dados mais ricos desbloqueiam. Não toca no pipeline real.
+    """
+    from .future.synth import build_all_synth
+    from .future.train import train_all
+    console.print("[cyan]=== Geração de datasets sintéticos (future) ===[/cyan]")
+    build_all_synth()
+    metas = train_all()
+
+    # sanity-check: confirma que as tendências dos efeitos estão corretas
+    from .future.predict import load_models, predict_future
+    load_models.cache_clear()
+    import pandas as pd
+    g = pd.read_parquet("data/training/panel_geometry.parquet").iloc[0].to_dict()
+    out = predict_future(g)
+    console.print(f"\n[cyan]Sanity-check[/cyan] (painel {out['panel_id']}):")
+    for key in ("temperature", "experience", "timeofday"):
+        sc = out[key]["scenarios"]
+        line = "  ".join(f"{s['label']}={s['total_sec']:.0f}s" for s in sc)
+        console.print(f"  [bold]{key:11}[/bold] {line}")
+    bd = out["general"]["breakdown"]
+    console.print(f"  [bold]general    [/bold] productive={bd['productive_pct']}% · "
+                  f"idle={bd['idle_no_value_pct']}% · material={bd['material_necessary_pct']}%")
+    console.print("[green]✓ future-build concluído[/green]")
+
+
 @app.command("parse-times")
 def parse_times(
     excels_dir: str = typer.Option("data/raw/Excel - Tempos Micro Tarefas", "--excels-dir"),
