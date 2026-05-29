@@ -99,6 +99,26 @@ function eSetApiKey(v) {
   try { v ? localStorage.setItem("blufab_api_key", v.trim()) : localStorage.removeItem("blufab_api_key"); } catch {}
 }
 
+// Recent predictions (client-side only, last 30) so a salesman can re-pull a quote.
+const PRED_HISTORY_KEY = "blufab_pred_history";
+function eGetPredHistory() {
+  try { return JSON.parse(localStorage.getItem(PRED_HISTORY_KEY) || "[]"); } catch { return []; }
+}
+function ePushPredHistory(entry) {
+  try {
+    const list = eGetPredHistory().filter((e) => e.key !== entry.key);
+    list.unshift(entry);
+    localStorage.setItem(PRED_HISTORY_KEY, JSON.stringify(list.slice(0, 30)));
+  } catch {}
+}
+function eTimeAgo(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return s + "s ago";
+  const m = Math.floor(s / 60); if (m < 60) return m + "m ago";
+  const h = Math.floor(m / 60); if (h < 24) return h + "h ago";
+  return Math.floor(h / 24) + "d ago";
+}
+
 async function eApi(base, path, opts = {}) {
   const url = base.replace(/\/+$/, "") + path;
   const key = eGetApiKey();
@@ -1782,6 +1802,7 @@ function PredictTab({ server }) {
   const [visibleCount, setVisibleCount] = useStateE(20);
   const [copied, setCopied] = useStateE(false);
   const [submitError, setSubmitError] = useStateE(null);
+  const [history, setHistory] = useStateE(eGetPredHistory());
   const itemsRef = useRefE(items);
   itemsRef.current = items;
   const sentinelRef = useRefE(null);
@@ -1806,6 +1827,14 @@ function PredictTab({ server }) {
       }
       const total = itemsRef.current.length;
       patchItem(it.id, { state: "success", result: data, error: null, expanded: !shouldStartCollapsed(total) });
+      if (it.kind === "key" && data) {
+        ePushPredHistory({
+          key: it.key, total_sec: data.total_sec ?? null,
+          lo: typeof data.total_lo_sec === "number" ? data.total_lo_sec : null,
+          hi: typeof data.total_hi_sec === "number" ? data.total_hi_sec : null,
+          level: data.interval_level || null, ts: Date.now(),
+        });
+      }
     } catch (e) {
       patchItem(it.id, { state: "error", error: e, expanded: true });
     }
@@ -1825,6 +1854,18 @@ function PredictTab({ server }) {
     });
     await Promise.all(workers);
     setRunning(false);
+    setHistory(eGetPredHistory());
+  }
+
+  // Re-run one or more order keys directly (used by the Recent orders list).
+  function runOrders(keys) {
+    const newItems = keys.map((k) => ({
+      id: eRid(), kind: "key", key: k, label: k,
+      state: "pending", result: null, error: null, expanded: false,
+    }));
+    setKeyMergedCount(0);
+    setItems(newItems);
+    runBatch(newItems);
   }
 
   function submit() {
@@ -1932,6 +1973,30 @@ function PredictTab({ server }) {
           </div>
         )}
       </Card>
+
+      {history.length > 0 && (
+        <Card className="mb-5">
+          <div className="flex items-center justify-between mb-2.5">
+            <div className="text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] inline-flex items-center gap-1.5">
+              <I.History size={13} /> Recent orders
+              <HelpTip label="Recent orders" text="Order numbers you predicted recently on this device. Click one to pull its quote again. Stored locally in your browser only." />
+            </div>
+            <button type="button" onClick={() => { try { localStorage.removeItem(PRED_HISTORY_KEY); } catch {} setHistory([]); }}
+              className="text-[12px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors">Clear</button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {history.slice(0, 12).map((h) => (
+              <button key={h.key} type="button" onClick={() => runOrders([h.key])} disabled={running}
+                className="group inline-flex items-center gap-2 h-8 px-3 rounded-md border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] transition-colors disabled:opacity-50">
+                <span className="font-mono text-[12.5px] text-[var(--text)]">{h.key}</span>
+                {typeof h.total_sec === "number" && <span className="text-[11px] text-[var(--text-muted)] tabular-nums">{eFormatSeconds(h.total_sec)}</span>}
+                <span className="text-[10.5px] text-[var(--text-faint)]">{eTimeAgo(h.ts)}</span>
+                <I.RotateCcw size={12} className="text-[var(--text-faint)] group-hover:text-[var(--accent-hover)]" />
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {displayItems.length > 0 && (
         <div className="space-y-4">
