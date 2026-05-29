@@ -28,7 +28,18 @@ GEOM = [
     "espessura_placa_mm",
 ]
 
+# Canonical UI language is English (matches the frontend). MICRO_OP_NAMES_PT is
+# kept for future localisation. These are display labels only — no lookup/enum
+# anywhere keys off the string, so changing them is safe.
 MICRO_OP_NAMES = {
+    1: "Pick profiles", 2: "Place profiles", 3: "Fix frame",
+    4: "Measure / align", 5: "Crimp frame", 6: "Place board(s)",
+    7: "Measure / adjust board", 8: "Screw board(s)", 9: "Remove fasteners",
+    10: "Flip frame", 11: "Crimp 2", 12: "Label", 13: "Pallet / transport",
+    14: "Move table",
+}
+
+MICRO_OP_NAMES_PT = {
     1: "Pegar nos perfis", 2: "Colocar perfis na bancada", 3: "Fixar estrutura",
     4: "Medições/alinhamentos", 5: "Cravação 1", 6: "Pegar e colocar placa(s)",
     7: "Medições/ajustes placa", 8: "Aparafusar placa(s)", 9: "Remover fixadores",

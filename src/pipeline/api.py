@@ -373,9 +373,30 @@ def retrain(body: dict = Body(default={}), _auth=Depends(require_token)):
     return job
 
 
+def _job_mae(job: dict):
+    tr = job.get("train_report") or {}
+    return tr.get("mae")
+
+
+def _annotate_outcomes(items_oldest_first: list[dict]) -> None:
+    """Anota cada job com o MAE do deploy anterior e a melhoria (%) — 'o que mudou'.
+
+    Compara em ordem cronológica: cada job deployado herda o MAE do deploy
+    anterior como `prior_mae`; `improvement_pct` > 0 = erro mais baixo (melhor).
+    """
+    prev_mae = None
+    for j in items_oldest_first:
+        mae = _job_mae(j)
+        if j.get("deployed") and isinstance(mae, (int, float)):
+            if isinstance(prev_mae, (int, float)) and prev_mae > 0:
+                j["prior_mae"] = prev_mae
+                j["improvement_pct"] = round((prev_mae - mae) / prev_mae * 100, 1)
+            prev_mae = mae
+
+
 @app.get("/retrain/log")
 def retrain_log(limit: int = Query(20, ge=1, le=100), _auth=Depends(require_token)):
-    """Histórico dos retreinos (mais recentes primeiro)."""
+    """Histórico dos retreinos (mais recentes primeiro), anotado com 'o que mudou'."""
     try:
         log = json.loads(LOG_PATH.read_text()) if LOG_PATH.exists() else []
     except Exception:
@@ -383,7 +404,9 @@ def retrain_log(limit: int = Query(20, ge=1, le=100), _auth=Depends(require_toke
     # inclui jobs em memória ainda a correr
     seen = {j.get("job_id") for j in log}
     live = [j for j in JOBS.values() if j["job_id"] not in seen]
-    items = sorted(log + live, key=lambda j: j.get("started_at") or "", reverse=True)
+    all_jobs = sorted(log + live, key=lambda j: j.get("started_at") or "")  # oldest first
+    _annotate_outcomes(all_jobs)
+    items = list(reversed(all_jobs))  # newest first for the UI
     return {"items": items[:limit], "count": len(items)}
 
 

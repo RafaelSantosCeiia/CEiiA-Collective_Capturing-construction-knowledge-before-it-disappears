@@ -74,12 +74,27 @@ PYTHONPATH=src python -m uvicorn pipeline.api:app --host 127.0.0.1 --port 8000
 python -m http.server 5500 -d frontend     # http://127.0.0.1:5500
 ```
 
-Páginas do frontend: **Live Dashboard** (mock de chão de fábrica, dados simulados),
-**Predictor** (PDF → previsão por painel/micro-op + export PDF/CSV), **Model Metrics**
-(curva de aprendizagem e calibração ao longo do tempo), **Training** e **History**
-(retreino manual + agendamento). O botão **Future Vision** (barra de topo) abre uma
-página à parte — a demonstração de §6 (dados fictícios). As previsões/estados
-persistem ao trocar de separador (cache em memória).
+O frontend está organizado por audiência, em três grupos na barra lateral
+(navegação por hash — `#predict`, `#metrics`, … — com deep-link e botão "voltar"):
+
+- **Operations** (chão de fábrica + comercial):
+  - **Live Dashboard** — mock de chão de fábrica (dados simulados, com selo *DEMO*
+    e tooltips). Tem **Wall mode**: vista quiosque para um ecrã montado, com o painel
+    em produção como herói (código + cronómetro grandes, legíveis à distância) e as
+    tabelas densas escondidas.
+  - **Predictor** — código de painel ou PDF → previsão. Lidera com o **total + intervalo
+    de confiança** (q80/q90); detalhe por micro-op colapsado; **Recent orders** (histórico
+    local, re-correr num clique); export **CSV** (com intervalos) e **PDF de cotação** de
+    uma página.
+- **Model** (dono de ML):
+  - **Model Metrics** — chip de saúde do modelo, curva de aprendizagem e calibração, em
+    linguagem simples.
+  - **Training** — retreino manual + agendamento (o n8n arranca o retreino por aqui).
+  - **History** (*Retrain history*) — cada retreino, **o que mudou** (Δ MAE vs deploy
+    anterior), e detalhe clicável.
+- **Vision**: **Future Vision** — a demonstração de §6 (dados fictícios).
+
+As previsões e estados persistem ao trocar de separador (cache em memória).
 
 Para n8n / exposição pública: define `API_KEY` no `.env` (ativa o header `X-API-Key`)
 e abre um túnel (`cloudflared tunnel --url http://127.0.0.1:8000` ou `ngrok http 8000`).

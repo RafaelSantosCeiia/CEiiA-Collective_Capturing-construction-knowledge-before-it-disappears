@@ -31,6 +31,8 @@ const I = {
   Activity: (p) => <Svg {...p}><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.68 2.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4.45 12H2" /></Svg>,
   Plus: (p) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>,
   Minus: (p) => <Svg {...p}><path d="M5 12h14" /></Svg>,
+  Maximize: (p) => <Svg {...p}><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" /></Svg>,
+  Minimize: (p) => <Svg {...p}><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" /></Svg>,
   FileUp: (p) => <Svg {...p}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M12 12v6" /><path d="m9 15 3-3 3 3" /></Svg>,
   FileText: (p) => <Svg {...p}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8" /><path d="M16 13H8" /><path d="M16 17H8" /></Svg>,
   FileSearch: (p) => <Svg {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><circle cx="11.5" cy="14.5" r="2.5" /><path d="M13.27 16.27 15 18" /></Svg>,
@@ -97,6 +99,19 @@ function eGetApiKey() {
 }
 function eSetApiKey(v) {
   try { v ? localStorage.setItem("blufab_api_key", v.trim()) : localStorage.removeItem("blufab_api_key"); } catch {}
+}
+
+// Recent predictions (client-side only, last 30) so a salesman can re-pull a quote.
+const PRED_HISTORY_KEY = "blufab_pred_history";
+function eGetPredHistory() {
+  try { return JSON.parse(localStorage.getItem(PRED_HISTORY_KEY) || "[]"); } catch { return []; }
+}
+function ePushPredHistory(entry) {
+  try {
+    const list = eGetPredHistory().filter((e) => e.key !== entry.key);
+    list.unshift(entry);
+    localStorage.setItem(PRED_HISTORY_KEY, JSON.stringify(list.slice(0, 30)));
+  } catch {}
 }
 
 async function eApi(base, path, opts = {}) {
@@ -203,41 +218,67 @@ function eExportCsv(items) {
   eDownloadFile(eBuildBatchCsv(items), "blufab-estimate.csv", "text/csv;charset=utf-8;");
 }
 
-function eExportPdf(items) {
+// Branded one-page quote per order: headline total + confidence range + ops table.
+function eExportPdf(items, opts = {}) {
   const JsPDF = window.jspdf && window.jspdf.jsPDF;
   if (!JsPDF) { alert("PDF library not loaded — check your connection and retry."); return; }
   const doc = new JsPDF({ unit: "pt", format: "a4" });
-  const M = 40; let y = M;
-  doc.setFontSize(15); doc.setTextColor(20, 20, 20);
-  doc.text("BluFab — Production time estimate", M, y); y += 16;
-  doc.setFontSize(9); doc.setTextColor(130, 130, 130);
-  doc.text(new Date().toLocaleString(), M, y); y += 14;
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 48;
   const success = items.filter(it => it.state === "success" && it.result);
-  for (const it of success) {
-    const label = (it.result.key || it.label || "order");
-    const total = eFormatSeconds(eItemTotalSec(it));
-    if (y > 740) { doc.addPage(); y = M; }
-    doc.setFontSize(11); doc.setTextColor(20, 20, 20);
-    doc.text(`${label}   —   ${total}`, M, y);
+  if (!success.length) return;
+  const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+
+  success.forEach((it, idx) => {
+    if (idx > 0) doc.addPage();
+    let y = M;
+    doc.setFillColor(37, 99, 235); doc.rect(0, 0, W, 6, "F");           // brand bar
+    doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(20, 20, 20);
+    doc.text("BluFab", M, y + 16);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
+    doc.text("Production time estimate", M, y + 32);
+    if (opts.modelName) doc.text("Model: " + opts.modelName, W - M, y + 32, { align: "right" });
+    y += 62;
+
+    const label = String(it.result.key || it.label || "order");
+    doc.setFontSize(9); doc.setTextColor(120, 120, 120); doc.text("ORDER", M, y);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.setTextColor(20, 20, 20);
+    doc.text(label, M, y + 17); y += 40;
+
+    const total = eItemTotalSec(it), rng = eItemRange(it);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(120, 120, 120);
+    doc.text("ESTIMATED TOTAL", M, y);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(26); doc.setTextColor(20, 20, 20);
+    doc.text(eFormatSeconds(total), M, y + 26);
+    if (rng) {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(90, 90, 90);
+      doc.text(`${eFmtLevelPct(rng.level)} confidence range:  ${eFormatSeconds(rng.lo)} – ${eFormatSeconds(rng.hi)}`, M, y + 44);
+    }
+    y += 64;
+
     const preds = (it.result.predictions || []).slice().sort((a, b) => (a.op_order || 0) - (b.op_order || 0));
-    const body = preds.map(p => [String(p.op_order ?? ""), String(p.op_id ?? ""), eFormatSeconds(p.predicted_duration_sec)]);
     doc.autoTable({
-      startY: y + 8,
-      head: [["#", "Operation", "Duration"]],
-      body,
-      styles: { fontSize: 9, cellPadding: 4 },
+      startY: y,
+      head: [["#", "Operation", "Duration", "Share"]],
+      body: preds.map(p => [
+        String(p.op_order ?? ""), String(p.op_id ?? ""),
+        eFormatSeconds(p.predicted_duration_sec),
+        (total ? (p.predicted_duration_sec / total * 100) : 0).toFixed(1) + "%",
+      ]),
+      styles: { fontSize: 9, cellPadding: 5 },
       headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-      columnStyles: { 0: { cellWidth: 36 }, 2: { halign: "right", cellWidth: 90 } },
+      columnStyles: { 0: { cellWidth: 32 }, 2: { halign: "right", cellWidth: 90 }, 3: { halign: "right", cellWidth: 64 } },
       margin: { left: M, right: M },
-      theme: "grid",
+      theme: "striped",
     });
-    y = doc.lastAutoTable.finalY + 20;
-  }
+
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(150, 150, 150);
+    doc.text(`Estimate valid as of ${today}.  Smart prediction based on past orders — not a guarantee.`, M, H - 32);
+  });
   doc.save("blufab-estimate.pdf");
 }
 
 function eBuildBatchCsv(items) {
-  const rows = ["order,op_id,op_order,predicted_duration_sec"];
+  const rows = ["order,op_id,op_order,predicted_duration_sec,lo_sec,hi_sec"];
   for (const it of items) {
     if (it.state !== "success" || !it.result) continue;
     const order =
@@ -254,7 +295,9 @@ function eBuildBatchCsv(items) {
           eCsvEscape(order),
           eCsvEscape(p.op_id),
           eCsvEscape(p.op_order ?? ""),
-          eCsvEscape(p.predicted_duration_sec ?? "")
+          eCsvEscape(p.predicted_duration_sec ?? ""),
+          eCsvEscape(p.lo_sec ?? ""),
+          eCsvEscape(p.hi_sec ?? "")
         ].join(",")
       );
     }
@@ -512,19 +555,27 @@ function StatusDot({ tone }) {
 /* ============================================================
  * SIDEBAR
  * ============================================================ */
+// Grouped by audience: Operations (floor + sales), Model (ML/ops owner), Vision (roadmap).
 const NAV = [
-{ id: "dashboard", label: "Live Dashboard", subtitle: "Shop-floor production view (demo · simulated data).", Icon: I.Gauge },
-{ id: "predict", label: "Predictor", subtitle: "Predict per-operation durations for an order.", Icon: I.Calculator },
-{ id: "metrics", label: "Model Metrics", subtitle: "How accuracy improves as data grows.", Icon: I.Activity },
-{ id: "retrain", label: "Training", subtitle: "Refit the deployed model on the latest data.", Icon: I.Cpu },
-{ id: "history", label: "History", subtitle: "Recent retrain jobs and outcomes.", Icon: I.History }];
+  { section: "Operations", items: [
+    { id: "dashboard", label: "Live Dashboard", subtitle: "Shop-floor production view (demo · simulated data).", Icon: I.Gauge },
+    { id: "predict", label: "Predictor", subtitle: "Predict per-operation durations for an order.", Icon: I.Calculator }] },
+  { section: "Model", items: [
+    { id: "metrics", label: "Model Metrics", subtitle: "How accuracy improves as data grows.", Icon: I.Activity },
+    { id: "retrain", label: "Training", subtitle: "Refit the deployed model on the latest data.", Icon: I.Cpu },
+    { id: "history", label: "History", subtitle: "Recent retrain jobs and outcomes.", Icon: I.History }] },
+  { section: "Vision", items: [
+    { id: "future", label: "Future Vision", subtitle: "What richer data unlocks (demo · fictitious).", Icon: I.Layers, badge: "demo" }] }];
+
+// Flat list of all tab ids (keep-alive, hash routing).
+const NAV_IDS = NAV.flatMap((s) => s.items.map((i) => i.id));
 
 
 /* ============================================================
  * MODEL METRICS (longitudinal)
  * ============================================================ */
-function MetricChart({ series, refLines = [], yMin, yMax, yUnit = "", xLabel, xTicks = [], xUnit = "", yNice = false }) {
-  const W = 620, H = 250, P = { l: 46, r: 14, t: 14, b: xTicks.length ? 44 : 34 };
+function MetricChart({ series, refLines = [], yMin, yMax, yUnit = "", xLabel, xTicks = [], xUnit = "", yNice = false, yLabel }) {
+  const W = 620, H = 250, P = { l: yLabel ? 60 : 46, r: 14, t: 14, b: xTicks.length ? 44 : 34 };
   const xs = series.flatMap(s => s.pts.map(p => p.x));
   const ys = series.flatMap(s => s.pts.map(p => p.y)).concat(refLines.map(r => r.y));
   if (!xs.length) return null;
@@ -568,17 +619,42 @@ function MetricChart({ series, refLines = [], yMin, yMax, yUnit = "", xLabel, xT
         );
       })}
       {xLabel && <text x={(P.l + W - P.r) / 2} y={H - 6} textAnchor="middle" fontSize="10.5" fill="var(--text-muted)">{xLabel}</text>}
+      {yLabel && <text x={14} y={(P.t + H - P.b) / 2} textAnchor="middle" fontSize="10.5" fill="var(--text-muted)" transform={`rotate(-90 14 ${(P.t + H - P.b) / 2})`}>{yLabel}</text>}
     </svg>
   );
 }
 
-function MetricStat({ label, value, sub, tone }) {
+function MetricStat({ label, value, sub, tone, plain }) {
   const col = tone === "ok" ? "var(--ok)" : tone === "warn" ? "var(--warn)" : "var(--text)";
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
       <div className="text-[11px] uppercase tracking-wider text-[var(--text-muted)] font-medium">{label}</div>
       <div className="mt-1 text-[20px] font-semibold tabular-nums" style={{ color: col }}>{value}</div>
       {sub && <div className="text-[11.5px] text-[var(--text-faint)] mt-0.5">{sub}</div>}
+      {plain && <div className="text-[11px] text-[var(--text-muted)] mt-1.5 leading-snug">{plain}</div>}
+    </div>
+  );
+}
+
+// One-line plain-English verdict on model health from calibration vs target.
+function ModelHealthChip({ coverageQ80 }) {
+  const d = Math.abs((coverageQ80 ?? 80) - 80);
+  const tone = d <= 8 ? "ok" : d <= 15 ? "warn" : "err";
+  const col = tone === "ok" ? "var(--ok)" : tone === "warn" ? "var(--warn)" : "var(--err)";
+  const verdict = tone === "ok" ? "Healthy" : tone === "warn" ? "Watch" : "Off-target";
+  const msg = tone === "ok"
+    ? "Confidence ranges are well calibrated — the model knows how sure it is."
+    : tone === "warn"
+      ? "Calibration is drifting from target — keep an eye on it."
+      : "Calibration is off — the confidence ranges can't be trusted yet.";
+  return (
+    <div className="flex items-center gap-3 rounded-lg border px-4 py-3" style={{ borderColor: col, background: "color-mix(in srgb, " + col + " 8%, var(--surface))" }}>
+      <StatusDot tone={tone} />
+      <div className="min-w-0">
+        <div className="text-[13px] font-semibold" style={{ color: col }}>Model health: {verdict}</div>
+        <div className="text-[11.5px] text-[var(--text-muted)] truncate">{msg}</div>
+      </div>
+      <HelpTip label="Model health" text="A quick verdict from how well the 80% confidence range is calibrated: Healthy = within 8 points of target, Watch = within 15, Off-target beyond that." className="ml-auto shrink-0" />
     </div>
   );
 }
@@ -594,8 +670,8 @@ function MetricsPage({ server }) {
     })();
   }, [server]);
 
-  if (err) return <div className="text-[13px] text-[var(--text-muted)]">Sem métricas. Corre <span className="font-mono">pipeline train</span> primeiro.</div>;
-  if (!data) return <div className="text-[13px] text-[var(--text-muted)]">A carregar métricas…</div>;
+  if (err) return <div className="text-[13px] text-[var(--text-muted)]">No metrics yet. Run <span className="font-mono">pipeline train</span> first.</div>;
+  if (!data) return <div className="text-[13px] text-[var(--text-muted)]">Loading metrics…</div>;
 
   const hist = data.history || [];
   const last = hist[hist.length - 1] || {};
@@ -609,20 +685,29 @@ function MetricsPage({ server }) {
     <div className="space-y-6">
       <PageHeader title="Model Metrics" subtitle="How the model improves as production data accumulates — and how honest its confidence stays." />
 
+      <ModelHealthChip coverageQ80={last.coverage_q80} />
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricStat label="Current error (MAE)" value={`${last.mae}s`} sub={`vs human limit ${floor}s`} />
-        <MetricStat label="Human noise floor" value={`${floor}s`} sub={`CV ${data.noise_floor_cv_pct}%`} tone="ok" />
-        <MetricStat label="Calibration 80%" value={`${last.coverage_q80}%`} sub="target 80%" tone={Math.abs(last.coverage_q80 - 80) <= 8 ? "ok" : "warn"} />
-        <MetricStat label="Training data" value={`${last.n_obs}`} sub={`${last.n_panels} panels`} />
+        <MetricStat label="Current error (MAE)" value={`${last.mae}s`} sub={`vs human limit ${floor}s`}
+          plain="How far off we usually are." />
+        <MetricStat label="Human noise floor" value={`${floor}s`} sub={`CV ${data.noise_floor_cv_pct}%`} tone="ok"
+          plain="The best a human could do — two people timing the same task disagree by about this much." />
+        <MetricStat label="Calibration 80%" value={`${last.coverage_q80}%`} sub="target 80%" tone={Math.abs(last.coverage_q80 - 80) <= 8 ? "ok" : "warn"}
+          plain="How often reality lands inside our predicted range. Target: about 8 in 10." />
+        <MetricStat label="Training data" value={`${last.n_obs}`} sub={`${last.n_panels} panels`}
+          plain="How many measurements the model has learned from." />
       </div>
 
       <Card padded={false}>
         <div className="px-5 pt-4">
-          <div className="text-[14px] font-semibold text-[var(--text)]">Accuracy vs data volume</div>
+          <div className="flex items-center gap-2">
+            <div className="text-[14px] font-semibold text-[var(--text)]">Accuracy vs data volume</div>
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-[var(--ok)]/40 text-[var(--ok)] bg-[var(--ok)]/10">lower is better</span>
+          </div>
           <div className="text-[12px] text-[var(--text-muted)] mt-0.5">Each panel of data lowers the error toward the human limit. Dashed = projection.</div>
         </div>
         <div className="px-3 pb-4 pt-2">
-          <MetricChart series={[accProj, accReal]} xLabel="training panels"
+          <MetricChart series={[accProj, accReal]} xLabel="training panels" yLabel="Error (seconds)"
             refLines={[{ y: floor, color: "var(--ok)", label: "human limit" }]} yUnit="s" />
         </div>
       </Card>
@@ -633,7 +718,7 @@ function MetricsPage({ server }) {
           <div className="text-[12px] text-[var(--text-muted)] mt-0.5">Confidence intervals stay honest as data grows (lines should hug the targets).</div>
         </div>
         <div className="px-3 pb-4 pt-2">
-          <MetricChart series={[covQ80, covQ90]} xLabel="training panels" yMin={50} yMax={100} yUnit="%"
+          <MetricChart series={[covQ80, covQ90]} xLabel="training panels" yLabel="Coverage (%)" yMin={50} yMax={100} yUnit="%"
             refLines={[{ y: 80, color: "var(--ok)", label: "80% target" }, { y: 90, color: "var(--accent-hover)", label: "90% target" }]} />
           <div className="px-2 mt-2 flex items-center gap-4 text-[11.5px] text-[var(--text-muted)]">
             <span className="inline-flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block" style={{ background: "var(--ok)" }} />80% interval</span>
@@ -726,20 +811,22 @@ function DLegend({ className = "" }) {
     </div>);
 }
 
-function DMetric({ icon, label, value, unit, sub, subTone, hint, alert }) {
+function DMetric({ icon, label, value, unit, sub, subTone, hint, alert, tip, size }) {
   const Icon = icon;
+  const big = size === "large";
   const sc = subTone === "up" ? "var(--ok)" : subTone === "down" ? "var(--err)" : "var(--text-faint)";
   return (
-    <div className="rounded-lg px-4 py-3.5 border bg-[var(--surface)]"
+    <div className={"rounded-lg border bg-[var(--surface)] " + (big ? "px-5 py-5" : "px-4 py-3.5")}
       style={alert ? { borderColor: "var(--err)", background: "color-mix(in srgb, var(--err) 8%, var(--surface))" } : { borderColor: "var(--border)" }}>
-      <div className="text-[11.5px] flex items-center gap-1.5" style={{ color: alert ? "var(--err)" : "var(--text-muted)" }}>
-        <Icon size={13} />{label}
+      <div className={"flex items-center gap-1.5 " + (big ? "text-[13px]" : "text-[11.5px]")} style={{ color: alert ? "var(--err)" : "var(--text-muted)" }}>
+        <Icon size={big ? 16 : 13} />{label}
+        {tip && <HelpTip label={label} text={tip} size={13} className="ml-auto" />}
       </div>
-      <div className="mt-1.5 text-[22px] font-semibold text-[var(--text)] tabular-nums">
-        {value}{unit && <span className="text-[14px] font-normal text-[var(--text-muted)] ml-0.5">{unit}</span>}
+      <div className={"font-semibold text-[var(--text)] tabular-nums " + (big ? "mt-2 text-[44px] lg:text-[56px] leading-none" : "mt-1.5 text-[22px]")}>
+        {value}{unit && <span className={"font-normal text-[var(--text-muted)] ml-0.5 " + (big ? "text-[22px]" : "text-[14px]")}>{unit}</span>}
       </div>
-      {sub && <div className="text-[11px] mt-0.5" style={{ color: alert ? "var(--err)" : sc }}>{sub}</div>}
-      {hint && <div className="text-[10.5px] mt-0.5 text-[var(--text-faint)]">{hint}</div>}
+      {sub && <div className={(big ? "text-[13px] mt-2" : "text-[11px] mt-0.5")} style={{ color: alert ? "var(--err)" : sc }}>{sub}</div>}
+      {hint && <div className={(big ? "text-[12px] mt-1" : "text-[10.5px] mt-0.5") + " text-[var(--text-faint)]"}>{hint}</div>}
     </div>);
 }
 
@@ -747,6 +834,7 @@ function DashboardPage() {
   const TOTAL_STEPS = 14, DONE_STEPS = 7, ACTIVE_STEP = 8;
   const [secs, setSecs] = useStateE(724);
   const [clock, setClock] = useStateE("");
+  const [wallMode, setWallMode] = useStateE(false);  // kiosk view: hero + key signals only
   useEffectE(() => {
     const id = setInterval(() => setSecs((s) => s + 1), 1000);
     return () => clearInterval(id);
@@ -772,48 +860,71 @@ function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* demo banner */}
-      <div className="rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-3 flex items-start gap-2.5">
-        <span className="text-[var(--accent-hover)] mt-0.5"><I.Info size={16} /></span>
-        <div className="text-[12.5px] text-[var(--text)] leading-relaxed">
-          <span className="font-semibold">Demo · simulated data.</span>{" "}
-          <span className="text-[var(--text-muted)]">Mockup of a shop-floor production panel. With real-time capture at the station (MES / sensors / per-panel label scan), these numbers feed live and the dashboard becomes functional — the model already predicts time per panel and per micro-operation.</span>
+      {/* demo banner — hidden in wall mode */}
+      {!wallMode && (
+        <div className="rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-3 flex items-start gap-2.5">
+          <span className="text-[var(--accent-hover)] mt-0.5"><I.Info size={16} /></span>
+          <div className="text-[12.5px] text-[var(--text)] leading-relaxed">
+            <span className="font-semibold">Demo · simulated data.</span>{" "}
+            <span className="text-[var(--text-muted)]">Mockup of a shop-floor production panel. With real-time capture at the station (MES / sensors / per-panel label scan), these numbers feed live and the dashboard becomes functional — the model already predicts time per panel and per micro-operation.</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* top bar */}
       <div className="flex items-center justify-between flex-wrap gap-3 pb-1 border-b border-[var(--border)]">
-        <div className="flex items-center gap-2.5 text-[15px] font-medium text-[var(--text)]">
-          <I.Gauge size={18} /> BluFab · Station 66 — Framing &amp; Boarding
+        <div className={"flex items-center gap-2.5 font-medium text-[var(--text)] " + (wallMode ? "text-[20px]" : "text-[15px]")}>
+          <I.Gauge size={wallMode ? 22 : 18} /> BluFab · Station 66 — Framing &amp; Boarding
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border border-[var(--warn)]/50 text-[var(--warn)] bg-[var(--warn)]/12">
+            Demo
+          </span>
+          <HelpTip label="Demo dashboard" text="This shop-floor dashboard runs on simulated data — a preview of how it would look fed by live capture at the station (MES / sensors / per-panel label scan). The model already predicts time per panel and per micro-operation; only the live feed is missing." size={14} />
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[12px] text-[var(--text-muted)]">{clock}</span>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ok)]/15 text-[var(--ok)] text-[11px] font-medium px-2.5 py-1">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--ok)] animate-pulse" /> live
           </span>
+          <button type="button" onClick={() => setWallMode((w) => !w)}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] border border-[var(--border)] hover:bg-[var(--surface-2)] transition-colors">
+            {wallMode ? <I.Minimize size={14} /> : <I.Maximize size={14} />}
+            {wallMode ? "Exit wall mode" : "Wall mode"}
+          </button>
+          <HelpTip label="Wall mode" text="A simplified kiosk view for a mounted floor display: shows only the running job, today's pace and any deviation, hiding the detailed tables — readable from across the room." size={14} />
         </div>
       </div>
 
       {/* color legend — defines the rule once for the whole dashboard */}
       <DLegend className="-mt-1" />
 
-      {/* metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <DMetric icon={I.CircleCheck} label="Panels completed" value="7" sub="of 11 planned today" hint="64% of today's plan" />
-        <DMetric icon={I.Clock} label="Avg actual time" value="18" unit="min" sub="↓ 2 min vs estimate" subTone="up" hint="average of panels completed today" />
-        <DMetric icon={I.Activity} label="Model accuracy" value="91" unit="%" sub="↑ 3% this week" subTone="up" hint="predictions within ±15% of actual" />
-        <DMetric icon={I.CircleAlert} label="Deviations > 20%" value="1" sub="ECO_PP01K · 25.4m vs 19.8m est." alert />
+      {/* primary KPIs — the two that matter at a glance; enlarged in wall mode */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <DMetric icon={I.CircleCheck} label="Today's pace" value="7" unit="/ 11" sub="64% of today's plan" size={wallMode ? "large" : undefined}
+          tip="How many panels have been finished today, out of the number planned for the shift." />
+        <DMetric icon={I.CircleAlert} label="Deviations > 20%" value="1" sub="ECO_PP01K · 25.4m vs 19.8m est." alert size={wallMode ? "large" : undefined}
+          tip="Panels whose real build time differs from the estimate by more than 20% — flagged for a closer look." />
       </div>
+
+      {/* secondary KPIs — analytical, hidden in wall mode */}
+      {!wallMode && (
+        <div className="grid grid-cols-2 gap-3">
+          <DMetric icon={I.Clock} label="Avg actual time" value="18" unit="min" sub="↓ 2 min vs estimate" subTone="up" hint="average of panels completed today"
+            tip="Average real build time of the panels completed today. The arrow compares it to the estimate (down = faster than estimated)." />
+          <DMetric icon={I.Activity} label="Model accuracy" value="91" unit="%" sub="↑ 3% this week" subTone="up" hint="predictions within ±15% of actual"
+            tip="Share of recent predictions that landed within 15% of the actual measured time. Demo figure — the real, audited accuracy (error vs human floor, calibration) is on the Model Metrics page." />
+        </div>
+      )}
 
       {/* in production now */}
       <Card padded={false}>
         <div className="px-5 pt-4 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
           <I.Play size={13} /> In production now
+          <HelpTip label="In production now" text="The panel currently being built at this station: its code, elapsed time vs the estimate, and progress through the micro-operations." size={13} className="ml-auto" />
         </div>
         <div className="px-5 py-4 flex flex-col md:flex-row items-start gap-5">
           <div className="flex-1 min-w-0 w-full">
-            <div className="text-[20px] font-semibold text-[var(--text)] font-mono">ECO_PG03K</div>
-            <div className="text-[12px] text-[var(--text-muted)] mt-0.5">ECOCIAF01 GENERAL PAIR 03K · IS01A · Batch #024</div>
+            <div className={"font-semibold text-[var(--text)] font-mono leading-none " + (wallMode ? "text-[48px] lg:text-[64px]" : "text-[20px]")}>ECO_PG03K</div>
+            <div className={"text-[var(--text-muted)] " + (wallMode ? "text-[15px] mt-2" : "text-[12px] mt-0.5")}>ECOCIAF01 GENERAL PAIR 03K · IS01A · Batch #024</div>
             {/* progress grouped by phase so segments align with labels */}
             <div className="flex gap-2 mt-3.5">
               {D_PHASES.map((ph, pi) => {
@@ -836,23 +947,26 @@ function DashboardPage() {
             <div className="text-[12px] text-[var(--text-muted)]">Step {ACTIVE_STEP} of {TOTAL_STEPS} · phase <span className="text-[var(--warn)]">boarding</span> · in progress</div>
           </div>
           <div className="hidden md:block w-px self-stretch bg-[var(--border)]" />
-          <div className="text-right md:min-w-[140px]">
-            <div className="text-[11px] text-[var(--text-muted)]">elapsed</div>
-            <div className="text-[28px] font-semibold font-mono mt-1 tabular-nums" style={{ color: overEst ? "var(--err)" : "var(--text)" }}>{elapsed}</div>
-            <div className="text-[11px] text-[var(--text-muted)] mt-1">estimate: 16 min</div>
-            <div className="text-[12px] font-medium mt-1.5 inline-flex items-center gap-1 justify-end" style={{ color: paceColor }}>
-              {overEst ? <I.CircleAlert size={13} /> : <I.CircleCheck size={13} />} {paceLabel}
+          <div className={"text-right " + (wallMode ? "md:min-w-[260px]" : "md:min-w-[140px]")}>
+            <div className={"text-[var(--text-muted)] " + (wallMode ? "text-[13px]" : "text-[11px]")}>elapsed</div>
+            <div className={"font-semibold font-mono tabular-nums leading-none " + (wallMode ? "text-[56px] lg:text-[72px] mt-2" : "text-[28px] mt-1")} style={{ color: overEst ? "var(--err)" : "var(--text)" }}>{elapsed}</div>
+            <div className={"text-[var(--text-muted)] " + (wallMode ? "text-[13px] mt-2" : "text-[11px] mt-1")}>estimate: 16 min</div>
+            <div className={"font-medium inline-flex items-center gap-1 justify-end " + (wallMode ? "text-[16px] mt-3 px-3 py-1.5 rounded-full" : "text-[12px] mt-1.5")}
+              style={wallMode ? { color: paceColor, background: "color-mix(in srgb, " + paceColor + " 14%, transparent)" } : { color: paceColor }}>
+              {overEst ? <I.CircleAlert size={wallMode ? 18 : 13} /> : <I.CircleCheck size={wallMode ? 18 : 13} />} {paceLabel}
             </div>
           </div>
         </div>
       </Card>
 
-      {/* two-col bottom */}
+      {/* two-col bottom — detailed tables, hidden in wall mode */}
+      {!wallMode && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {/* micro-processes */}
         <Card padded={false}>
           <div className="px-5 pt-4 pb-1 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
             <I.BarChart size={13} /> Time per micro-operation
+            <HelpTip label="Time per micro-operation" text="How long each step of the current panel takes. Bar length = duration; color = deviation from the expected time (green on target, amber/red slower)." size={13} className="ml-auto" />
           </div>
           <div className="px-5 text-[10.5px] text-[var(--text-faint)] pb-2">longer bar = slower · color = deviation vs expected</div>
           <div className="px-5 pb-4 space-y-2">
@@ -886,6 +1000,7 @@ function DashboardPage() {
           <Card padded={false}>
             <div className="px-5 pt-4 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
               <I.Activity size={13} /> Actual vs estimate · by finish order
+              <HelpTip label="Actual vs estimate" text="For panels finished today, the real build time (bar) against the original estimate (vertical mark), in the order they finished. Color shows how far off the estimate was." size={13} className="ml-auto" />
             </div>
             <div className="px-5 pt-2 pb-4">
               <div className="flex gap-4 text-[11px] text-[var(--text-muted)] mb-3">
@@ -916,6 +1031,7 @@ function DashboardPage() {
           <Card padded={false}>
             <div className="px-5 pt-4 pb-2 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
               <I.List size={13} /> MES sequence · today
+              <HelpTip label="MES sequence" text="Today's planned production order from the MES (Manufacturing Execution System): each panel's reference, start time, duration and status (done / in progress / queued)." size={13} className="ml-auto" />
             </div>
             <div className="px-5 pb-4">
               <table className="w-full text-[12px]">
@@ -944,6 +1060,7 @@ function DashboardPage() {
           </Card>
         </div>
       </div>
+      )}
     </div>);
 }
 
@@ -963,24 +1080,28 @@ function Sidebar({ active, onChange }) {
         </div>
       </div>
 
-      <nav className="px-3 py-4 space-y-1">
-        <div className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">Workspace</div>
-        {NAV.map((n) => {
-          const isActive = active === n.id;
-          return (
-            <button key={n.id} onClick={() => onChange(n.id)}
-            className={"w-full text-left flex items-center gap-3 px-3 h-10 rounded-md transition-colors duration-150 " + (
-            isActive ?
-            "bg-[var(--accent)]/12 text-[var(--text)]" :
-            "text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]")}>
-              <span className={isActive ? "text-[var(--accent-hover)]" : "text-[var(--text-faint)]"}>
-                <n.Icon size={17} />
-              </span>
-              <span className="text-[14px] font-medium flex-1">{n.label}</span>
-              {isActive && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-hover)]" />}
-            </button>);
-
-        })}
+      <nav className="px-3 py-4 space-y-4 overflow-y-auto">
+        {NAV.map((group) => (
+          <div key={group.section} className="space-y-1">
+            <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">{group.section}</div>
+            {group.items.map((n) => {
+              const isActive = active === n.id;
+              return (
+                <button key={n.id} onClick={() => onChange(n.id)}
+                className={"w-full text-left flex items-center gap-3 px-3 h-10 rounded-md transition-colors duration-150 " + (
+                isActive ?
+                "bg-[var(--accent)]/12 text-[var(--text)]" :
+                "text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]")}>
+                  <span className={isActive ? "text-[var(--accent-hover)]" : "text-[var(--text-faint)]"}>
+                    <n.Icon size={17} />
+                  </span>
+                  <span className="text-[14px] font-medium flex-1">{n.label}</span>
+                  {n.badge && <span className="text-[9.5px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-[var(--accent)]/40 text-[var(--accent-hover)] bg-[var(--accent)]/10">{n.badge}</span>}
+                  {isActive && !n.badge && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-hover)]" />}
+                </button>);
+            })}
+          </div>
+        ))}
       </nav>
 
       <div className="mt-auto px-5 py-4 border-t border-[var(--border)] text-[12px] text-[var(--text-faint)]">
@@ -993,7 +1114,7 @@ function Sidebar({ active, onChange }) {
 /* ============================================================
  * TOP BAR
  * ============================================================ */
-function TopBar({ server, setServer, health, modelName, onFuture }) {
+function TopBar({ server, setServer, health, modelName }) {
   const tone = health === "ok" ? "ok" : health === "checking" ? "slate" : "err";
   const label = health === "ok" ? "Connected" : health === "checking" ? "Checking…" : "Disconnected";
   const healthTip = health === "ok"
@@ -1017,14 +1138,6 @@ function TopBar({ server, setServer, health, modelName, onFuture }) {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        {onFuture && (
-          <button onClick={onFuture}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[13px] text-[var(--accent-hover)] hover:bg-[var(--accent)]/20 transition-colors">
-            <I.Activity size={15} />
-            <span>Future Vision</span>
-            <I.ChevDown size={14} className="-rotate-90" />
-          </button>
-        )}
         <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-[var(--border)] bg-[var(--surface)]">
           <StatusDot tone={tone} />
           <span className="text-[13px] text-[var(--text)]">{label}</span>
@@ -1052,6 +1165,15 @@ function eItemTotalSec(it) {
   if (typeof it.result.total_sec === "number") return it.result.total_sec;
   return (it.result.predictions || []).reduce((a, p) => a + (p.predicted_duration_sec || 0), 0);
 }
+
+// Conformal confidence band for a result, if present.
+function eItemRange(it) {
+  const r = it && it.result;
+  if (r && typeof r.total_lo_sec === "number" && typeof r.total_hi_sec === "number")
+    return { lo: r.total_lo_sec, hi: r.total_hi_sec, level: r.interval_level };
+  return null;
+}
+function eFmtLevelPct(level) { return level ? level.replace(/^q/, "") + "%" : ""; }
 
 function UnifiedEntriesInput({ entries, onChange, disabled }) {
   const inputRef = useRefE(null);
@@ -1379,6 +1501,7 @@ function ResultCard({ item, onToggle, onRetry }) {
   const isMerged = Array.isArray(item.members) && item.members.length > 1;
   const opChip = item.kind === "pdf" && item.result && item.result.key ? item.result.key : null;
   const total = eItemTotalSec(item);
+  const rng = eItemRange(item);
   const preds = (item.result && item.result.predictions) || [];
   const warnings = (item.result && item.result.warnings) || [];
   const extracted = item.result && item.result.extracted;
@@ -1421,7 +1544,10 @@ function ResultCard({ item, onToggle, onRetry }) {
         <div className="shrink-0 text-right min-w-0 max-w-[40%]">
           {item.state === "running" && <RunningDots />}
           {item.state === "success" && (
-            <div className="text-[13.5px] font-medium text-[var(--text)] tabular-nums">{eFormatSeconds(total)}</div>
+            <div>
+              <div className="text-[13.5px] font-medium text-[var(--text)] tabular-nums">{eFormatSeconds(total)}</div>
+              {rng && <div className="text-[11px] text-[var(--text-muted)] tabular-nums">{eFormatSeconds(rng.lo)}–{eFormatSeconds(rng.hi)}{rng.level ? " · " + eFmtLevelPct(rng.level) : ""}</div>}
+            </div>
           )}
           {item.state === "error" && (
             <div className="text-[12.5px] text-[var(--err)] truncate">{eShortError(item.error, errCtx)}</div>
@@ -1435,6 +1561,22 @@ function ResultCard({ item, onToggle, onRetry }) {
 
       {expanded && item.state === "success" && (
         <div className="border-t border-[var(--border)]">
+          {/* headline: lead with the quotable number + confidence range */}
+          <div className="px-4 py-3 flex items-end justify-between gap-3 flex-wrap border-b border-[var(--border-soft)] bg-[var(--surface-2)]/20">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">Estimated total</div>
+              <div className="text-[26px] font-semibold text-[var(--text)] tabular-nums leading-tight">{eFormatSeconds(total)}</div>
+            </div>
+            {rng && (
+              <div className="text-right">
+                <div className="text-[11px] text-[var(--text-muted)] inline-flex items-center gap-1.5 justify-end">
+                  {eFmtLevelPct(rng.level)} confidence range
+                  <HelpTip label="Confidence range" text="A calibrated band around the estimate. At the 80% level, the real time lands inside this range about 8 times out of 10 (90% → 9 of 10). Wider band = less certain." />
+                </div>
+                <div className="text-[15px] text-[var(--text)] tabular-nums">{eFormatSeconds(rng.lo)} – {eFormatSeconds(rng.hi)}</div>
+              </div>
+            )}
+          </div>
           {warnings.length > 0 && (
             <div className="mx-4 my-3 flex items-start gap-2.5 px-4 py-3 rounded-lg border border-[var(--warn)]/30 bg-[var(--warn)]/8 text-[12.5px] text-[var(--text)]">
               <I.CircleAlert size={15} className="text-[var(--warn)] mt-0.5 shrink-0" />
@@ -1565,6 +1707,13 @@ function BatchSummaryBar({ items, onToggleAll, allCollapsed, onExportCsv, onExpo
   const error = items.filter(it => it.state === "error").length;
   const running = items.filter(it => it.state === "running" || it.state === "pending").length;
   const aggregateSec = items.reduce((a, it) => a + (it.state === "success" ? eItemTotalSec(it) : 0), 0);
+  // aggregate confidence band across successful orders (sum of per-order bands)
+  const ranges = items.filter(it => it.state === "success").map(eItemRange).filter(Boolean);
+  const aggRange = ranges.length ? {
+    lo: ranges.reduce((a, r) => a + r.lo, 0),
+    hi: ranges.reduce((a, r) => a + r.hi, 0),
+    level: ranges[0].level,
+  } : null;
 
   return (
     <Card padded={false}>
@@ -1599,6 +1748,9 @@ function BatchSummaryBar({ items, onToggleAll, allCollapsed, onExportCsv, onExpo
               <HelpTip label="Combined estimated time" text="All the per-order estimates added together — roughly how long all of these panels would take in total." />
             </div>
             <div className="mt-1 text-[18px] font-semibold text-[var(--text)] tabular-nums leading-none">{eFormatSeconds(aggregateSec)}</div>
+            {aggRange && (
+              <div className="mt-1 text-[11.5px] text-[var(--text-muted)] tabular-nums leading-none">{eFormatSeconds(aggRange.lo)}–{eFormatSeconds(aggRange.hi)} · {eFmtLevelPct(aggRange.level)} range</div>
+            )}
             {success > 0 && (
               <div className="mt-1 text-[11.5px] text-[var(--text-faint)] leading-none">estimated time for {success} {success === 1 ? "order" : "orders"}</div>
             )}
@@ -1697,6 +1849,7 @@ function PredictTab({ server }) {
   const [visibleCount, setVisibleCount] = useStateE(20);
   const [copied, setCopied] = useStateE(false);
   const [submitError, setSubmitError] = useStateE(null);
+  const [history, setHistory] = useStateE(eGetPredHistory());
   const itemsRef = useRefE(items);
   itemsRef.current = items;
   const sentinelRef = useRefE(null);
@@ -1705,7 +1858,9 @@ function PredictTab({ server }) {
     setItems(prev => prev.map(it => it.id === id ? (typeof patch === "function" ? patch(it) : { ...it, ...patch }) : it));
   }
 
-  function shouldStartCollapsed(totalCount) { return totalCount > 3; }
+  // Always start collapsed: the card header is the headline (total + range);
+  // the per-operation breakdown opens on demand.
+  function shouldStartCollapsed() { return true; }
 
   async function runOneItem(it) {
     try {
@@ -1719,6 +1874,14 @@ function PredictTab({ server }) {
       }
       const total = itemsRef.current.length;
       patchItem(it.id, { state: "success", result: data, error: null, expanded: !shouldStartCollapsed(total) });
+      if (it.kind === "key" && data) {
+        ePushPredHistory({
+          key: it.key, total_sec: data.total_sec ?? null,
+          lo: typeof data.total_lo_sec === "number" ? data.total_lo_sec : null,
+          hi: typeof data.total_hi_sec === "number" ? data.total_hi_sec : null,
+          level: data.interval_level || null, ts: Date.now(),
+        });
+      }
     } catch (e) {
       patchItem(it.id, { state: "error", error: e, expanded: true });
     }
@@ -1738,6 +1901,18 @@ function PredictTab({ server }) {
     });
     await Promise.all(workers);
     setRunning(false);
+    setHistory(eGetPredHistory());
+  }
+
+  // Re-run one or more order keys directly (used by the Recent orders list).
+  function runOrders(keys) {
+    const newItems = keys.map((k) => ({
+      id: eRid(), kind: "key", key: k, label: k,
+      state: "pending", result: null, error: null, expanded: false,
+    }));
+    setKeyMergedCount(0);
+    setItems(newItems);
+    runBatch(newItems);
   }
 
   function submit() {
@@ -1845,6 +2020,30 @@ function PredictTab({ server }) {
           </div>
         )}
       </Card>
+
+      {history.length > 0 && (
+        <Card className="mb-5">
+          <div className="flex items-center justify-between mb-2.5">
+            <div className="text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] inline-flex items-center gap-1.5">
+              <I.History size={13} /> Recent orders
+              <HelpTip label="Recent orders" text="Order numbers you predicted recently on this device. Click one to pull its quote again. Stored locally in your browser only." />
+            </div>
+            <button type="button" onClick={() => { try { localStorage.removeItem(PRED_HISTORY_KEY); } catch {} setHistory([]); }}
+              className="text-[12px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors">Clear</button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {history.slice(0, 12).map((h) => (
+              <button key={h.key} type="button" onClick={() => runOrders([h.key])} disabled={running}
+                className="group inline-flex items-center gap-2 h-8 px-3 rounded-md border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)] transition-colors disabled:opacity-50">
+                <span className="font-mono text-[12.5px] text-[var(--text)]">{h.key}</span>
+                {typeof h.total_sec === "number" && <span className="text-[11px] text-[var(--text-muted)] tabular-nums">{eFormatSeconds(h.total_sec)}</span>}
+                <span className="text-[10.5px] text-[var(--text-faint)]">{eTimeAgo(h.ts)}</span>
+                <I.RotateCcw size={12} className="text-[var(--text-faint)] group-hover:text-[var(--accent-hover)]" />
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {displayItems.length > 0 && (
         <div className="space-y-4">
@@ -2456,6 +2655,7 @@ function HistoryTab({ server, reloadKey }) {
   const [loading, setLoading] = useStateE(true);
   const [error, setError] = useStateE(null);
   const [items, setItems] = useStateE([]);
+  const [detail, setDetail] = useStateE(null);  // job shown in the detail modal
 
   async function load() {
     setLoading(true);setError(null);
@@ -2471,12 +2671,12 @@ function HistoryTab({ server, reloadKey }) {
   return (
     <div>
       <PageHeader
-        title="History"
-        subtitle="The most recent 20 retrain jobs and their outcomes."
-        tooltip="Every time we taught the program new tricks shows up here."
+        title="Retrain history"
+        subtitle="The most recent 20 retrain jobs, what each one changed, and whether it was kept."
+        tooltip="Every time the model was retrained on newer data shows up here."
         about={
           <p>
-            A log of every time the program has been taught new tricks. Each row shows <span className="font-medium text-[var(--text)]">when</span> the training ran, which <span className="font-medium text-[var(--text)]">version</span> was tried, how accurate it turned out, and whether we <span className="font-medium text-[var(--text)]">kept it</span>.
+            A log of every <span className="font-medium text-[var(--text)]">model retrain</span> (not predictions). Each row shows <span className="font-medium text-[var(--text)]">when</span> it ran, the model version, its accuracy (MAE), <span className="font-medium text-[var(--text)]">how it changed</span> vs the previous deploy, and whether we <span className="font-medium text-[var(--text)]">kept it</span>. Click a row for full detail.
           </p>
         }
         action={<Button variant="secondary" onClick={load} loading={loading} icon={<I.Refresh size={15} />}>Refresh</Button>} />
@@ -2520,6 +2720,12 @@ function HistoryTab({ server, reloadKey }) {
                       <HelpTip label="MAE — Mean Absolute Error" text="Mean Absolute Error. On average, how many seconds off the program's estimates were from real measurements. Smaller is better." />
                     </span>
                   </th>
+                  <th className="px-6 py-3 text-right w-36">
+                    <span className="inline-flex items-center gap-1.5 justify-end w-full">
+                      Change
+                      <HelpTip label="What changed" text="How this deploy's accuracy compares to the previous one. Green = error went down (better); red = error went up." />
+                    </span>
+                  </th>
                   <th className="px-6 py-3 w-40">
                     <span className="inline-flex items-center gap-1.5">
                       Outcome
@@ -2537,20 +2743,33 @@ function HistoryTab({ server, reloadKey }) {
                 const when = it.finished_at || it.started_at;
                 const mae = it?.train_report?.mae ?? it?.train_report?.MAE ?? it.mae;
                 const modelName = it?.train_report?.model_name || it.model_name || it.model || "—";
+                const simulated = /simulated/i.test(String(modelName)) || it?.params?.dry_run === true;
+                const imp = typeof it.improvement_pct === "number" ? it.improvement_pct : null;
                 let badge;
                 if (failed) badge = <Badge tone="err" icon={<I.Octagon size={11} />}>Failed</Badge>;else
                 if (deployed) badge = <Badge tone="ok" icon={<I.BadgeCheck size={11} />}>Deployed</Badge>;else
                 if (rejected) badge = <Badge tone="warn" icon={<I.Shield size={11} />}>Rejected</Badge>;else
                 badge = <Badge tone="slate" icon={<I.Loader size={11} />}>{it.status || "Pending"}</Badge>;
                 return (
-                  <tr key={(it.job_id || it.id || i) + "-" + i} className="border-b border-[var(--border-soft)] last:border-b-0 hover:bg-[var(--surface-2)]/50 transition-colors">
+                  <tr key={(it.job_id || it.id || i) + "-" + i} onClick={() => setDetail(it)}
+                      className={"border-b border-[var(--border-soft)] last:border-b-0 hover:bg-[var(--surface-2)]/50 transition-colors cursor-pointer " + (simulated ? "opacity-60" : "")}>
                       <td className="px-6 py-3">
                         <div className="font-mono tabular-nums text-[var(--text)]">{eFormatAbs(when)}</div>
                         <div className="text-[11.5px] text-[var(--text-faint)] mt-0.5">{eTimeAgo(when)}</div>
                       </td>
-                      <td className="px-6 py-3 font-mono text-[var(--text-muted)] truncate max-w-[260px]">{modelName}</td>
+                      <td className="px-6 py-3 font-mono text-[var(--text-muted)] truncate max-w-[260px]">
+                        {modelName}
+                        {simulated && <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-[var(--border)] text-[var(--text-faint)] not-italic">Simulated</span>}
+                      </td>
                       <td className="px-6 py-3 font-mono tabular-nums text-right text-[var(--text)]">
                         {mae != null ? typeof mae === "number" ? mae.toFixed(3) : String(mae) : "—"}
+                      </td>
+                      <td className="px-6 py-3 text-right tabular-nums">
+                        {imp != null ? (
+                          <span className="inline-flex items-center gap-1 font-medium" style={{ color: imp >= 0 ? "var(--ok)" : "var(--err)" }}>
+                            {imp >= 0 ? "▼" : "▲"} {Math.abs(imp).toFixed(1)}%
+                          </span>
+                        ) : <span className="text-[var(--text-faint)]">—</span>}
                       </td>
                       <td className="px-6 py-3">{badge}</td>
                     </tr>);
@@ -2561,8 +2780,47 @@ function HistoryTab({ server, reloadKey }) {
           </div>
         }
       </Card>
+
+      <RetrainDetailModal job={detail} onClose={() => setDetail(null)} />
     </div>);
 
+}
+
+function RetrainDetailModal({ job, onClose }) {
+  if (!job) return null;
+  const tr = job.train_report || {};
+  const mae = tr.mae ?? job.mae;
+  const imp = typeof job.improvement_pct === "number" ? job.improvement_pct : null;
+  const rows = [
+    ["Job ID", job.job_id || "—"],
+    ["Status", job.status || "—"],
+    ["Model", tr.model_name || job.model_name || "—"],
+    ["MAE", mae != null ? (typeof mae === "number" ? mae.toFixed(3) + "s" : String(mae)) : "—"],
+    ["Previous MAE", typeof job.prior_mae === "number" ? job.prior_mae.toFixed(3) + "s" : "—"],
+    ["Change vs previous", imp != null ? (imp >= 0 ? "−" : "+") + Math.abs(imp).toFixed(1) + "% error" : "—"],
+    ["Started", job.started_at ? eFormatAbs(job.started_at) : "—"],
+    ["Finished", job.finished_at ? eFormatAbs(job.finished_at) : "—"],
+    ["Trials", job.params && job.params.trials != null ? String(job.params.trials) : "—"],
+    ["Simulated", (job.params && job.params.dry_run) || /simulated/i.test(String(tr.model_name)) ? "yes" : "no"],
+  ];
+  return (
+    <Modal open={!!job} onClose={onClose} maxWidth="max-w-lg">
+      <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between">
+        <div className="text-[14px] font-semibold text-[var(--text)] inline-flex items-center gap-2"><I.History size={16} /> Retrain detail</div>
+        <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text)]"><I.X size={16} /></button>
+      </div>
+      <div className="px-5 py-4 space-y-1.5 max-h-[70vh] overflow-auto">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-baseline justify-between gap-4 text-[13px]">
+            <span className="text-[var(--text-muted)]">{k}</span>
+            <span className="font-mono tabular-nums text-[var(--text)] text-right">{v}</span>
+          </div>
+        ))}
+        {job.error && <PreBlock label="Error" content={String(job.error)} />}
+        {job.stderr_tail && <PreBlock label="stderr" content={String(job.stderr_tail)} max />}
+        {job.stdout_tail && <PreBlock label="stdout" content={String(job.stdout_tail)} max />}
+      </div>
+    </Modal>);
 }
 
 /* ============================================================
@@ -2650,7 +2908,7 @@ function FutureScenarioBlock({ icon, title, note, data, xLabel, xUnit = "" }) {
   );
 }
 
-function FutureGeneralResult({ general }) {
+function FutureGeneralResult({ general, level }) {
   return (
     <Card className="mb-4">
       <FutureSectionHead
@@ -2674,7 +2932,7 @@ function FutureGeneralResult({ general }) {
           <span className="font-medium"> random</span> (wide interval) — addressed through workflow discipline, not layout.
         </div>
       </div>
-      <FutureOpTable items={general.items} />
+      <FutureOpTable items={general.items} level={level} />
     </Card>
   );
 }
@@ -2694,7 +2952,8 @@ function FutureOpRow({ it }) {
   );
 }
 
-function FutureOpTable({ items }) {
+function FutureOpTable({ items, level }) {
+  const rangeLabel = level ? level.replace(/^q/, "") + "% range" : "Interval";
   const [open, setOpen] = useStateE(false);
   const productive = items.filter(it => it.micro_op_num <= 14);
   const waste = items.filter(it => it.micro_op_num >= 15);
@@ -2712,7 +2971,7 @@ function FutureOpTable({ items }) {
               <tr className="bg-[var(--surface-2)] text-[var(--text-muted)] text-[11.5px] uppercase tracking-wider">
                 <th className="px-4 py-2 text-left font-medium">Micro-operation</th>
                 <th className="px-4 py-2 text-right font-medium">Estimate</th>
-                <th className="px-4 py-2 text-right font-medium">Interval</th>
+                <th className="px-4 py-2 text-right font-medium">{rangeLabel}</th>
               </tr>
             </thead>
             <tbody>
@@ -2733,7 +2992,7 @@ function FutureOpTable({ items }) {
   );
 }
 
-function FuturePage({ server, onBack }) {
+function FuturePage({ server }) {
   const [code, setCode] = useStateE("");
   const [file, setFile] = useStateE(null);
   const [loading, setLoading] = useStateE(false);
@@ -2760,31 +3019,29 @@ function FuturePage({ server, onBack }) {
   }
 
   return (
-    <div className="h-screen overflow-auto bg-[var(--bg)]">
-      {/* standalone top bar (no sidebar) */}
-      <div className="h-[60px] border-b border-[var(--border)] flex items-center gap-3 px-6 sticky top-0 bg-[var(--bg)] z-20">
-        <button onClick={onBack}
-          className="flex items-center gap-1.5 h-9 px-3 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[13px] text-[var(--text)] hover:border-[var(--accent)] transition-colors">
-          <I.ChevDown size={15} className="rotate-90" /> Back
-        </button>
+    <div className="max-w-[1100px]">
+      <div className="mb-4">
         <div className="flex items-center gap-2">
-          <I.Activity size={17} className="text-[var(--accent-hover)]" />
-          <span className="text-[14px] font-semibold text-[var(--text)]">Future Vision</span>
+          <h1 className="text-[20px] font-semibold text-[var(--text)]">What richer data unlocks</h1>
           <span className="text-[11px] px-2 py-0.5 rounded-full border border-[var(--accent)]/40 text-[var(--accent-hover)] bg-[var(--accent)]/10">demo · fictitious data</span>
         </div>
+        <p className="text-[13.5px] text-[var(--text-muted)] mt-1 max-w-[760px]">
+          A glimpse of the future of this project. With more and richer measurements we can surface actionable patterns the current
+          model can't see: hidden waste, and how <span className="text-[var(--text)]">temperature</span>,
+          <span className="text-[var(--text)]"> operator experience</span> and <span className="text-[var(--text)]">time of day</span>
+          shift productivity. The central estimate uses the general model; the panels below show how each variable would move the time.
+        </p>
       </div>
 
-      <div className="px-6 lg:px-8 py-6 max-w-[1100px] mx-auto">
-        <div className="mb-5">
-          <h1 className="text-[20px] font-semibold text-[var(--text)]">What richer data unlocks</h1>
-          <p className="text-[13.5px] text-[var(--text-muted)] mt-1 max-w-[760px]">
-            A glimpse of the future of this project, built on <span className="text-[var(--text)] font-medium">fictitious data</span>.
-            With more and richer measurements we can surface actionable patterns the current model can't see: hidden waste, and how
-            <span className="text-[var(--text)]"> temperature</span>, <span className="text-[var(--text)]">operator experience</span> and
-            <span className="text-[var(--text)]"> time of day</span> shift productivity. The central estimate uses the general model;
-            the panels below show how each variable would move the time.
-          </p>
+      {/* prominent illustrative-not-measured banner */}
+      <div className="mb-5 flex items-start gap-2.5 px-4 py-3 rounded-lg border border-[var(--warn)]/40 bg-[var(--warn)]/10 text-[13px] text-[var(--text)]">
+        <I.CircleAlert size={16} className="text-[var(--warn)] mt-0.5 shrink-0" />
+        <div>
+          <span className="font-semibold text-[var(--warn)]">Illustrative preview — not measured.</span> These numbers come from
+          <span className="font-medium"> fictitious data</span> generated from real panel geometry, to show the patterns richer
+          measurements would unlock. They are not real results for any specific panel.
         </div>
+      </div>
 
         <Card className="mb-5">
           <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
@@ -2831,7 +3088,7 @@ function FuturePage({ server, onBack }) {
               Panel <span className="font-mono text-[var(--text)]">{result.panel_id}</span>
               {result.n_panels > 1 && <span> · {result.n_panels} sub-panels aggregated</span>}
             </div>
-            <FutureGeneralResult general={result.general} />
+            <FutureGeneralResult general={result.general} level={result.interval_level} />
             <FutureScenarioBlock icon={<I.Activity size={18} />} title="Temperature — ambient comfort"
               note={result.temperature.note} data={result.temperature} xLabel="Temperature (°C)" xUnit="°" />
             <FutureScenarioBlock icon={<I.BadgeCheck size={18} />} title="Operator experience"
@@ -2841,7 +3098,6 @@ function FuturePage({ server, onBack }) {
           </div>
         )}
       </div>
-    </div>
   );
 }
 
@@ -2850,21 +3106,31 @@ function FuturePage({ server, onBack }) {
  * ============================================================ */
 function EnterpriseApp() {
   const [server, setServer] = useStateE(E_DEFAULT_SERVER);
-  const [tab, setTab] = useStateE("dashboard");
+  const [tab, setTab] = useStateE(() => {
+    const h = (window.location.hash || "").replace(/^#/, "");
+    return NAV_IDS.includes(h) ? h : "dashboard";
+  });
   const [health, setHealth] = useStateE("checking");
   const [modelName, setModelName] = useStateE("");
   const [reloadKey, setReloadKey] = useStateE(0);
-  const [showFuture, setShowFuture] = useStateE(false);
   // keep-alive: a tab mounts on first visit and stays mounted (hidden via CSS),
-  // so predictions, training jobs, etc. survive switching tabs. FuturePage too.
+  // so predictions, training jobs and the Future Vision report survive tab switches.
   const [visited, setVisited] = useStateE({ dashboard: true });
-  const [futureMounted, setFutureMounted] = useStateE(false);
 
+  // tab ↔ URL hash (deep links + browser back/forward)
   useEffectE(() => {
     setVisited((v) => (v[tab] ? v : { ...v, [tab]: true }));
+    if ((window.location.hash || "").replace(/^#/, "") !== tab) window.location.hash = tab;
   }, [tab]);
 
-  function openFuture() { setFutureMounted(true); setShowFuture(true); }
+  useEffectE(() => {
+    const onHash = () => {
+      const h = (window.location.hash || "").replace(/^#/, "");
+      if (NAV_IDS.includes(h)) setTab(h);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   useEffectE(() => {
     let cancelled = false;
@@ -2889,25 +3155,19 @@ function EnterpriseApp() {
   }, [server, reloadKey]);
 
   return (
-    <div className="h-screen overflow-hidden">
-      <div className={"h-full flex " + (showFuture ? "hidden" : "")}>
-        <Sidebar active={tab} onChange={setTab} />
-        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-          <TopBar server={server} setServer={setServer} health={health} modelName={modelName} onFuture={openFuture} />
-          <main className="flex-1 min-h-0 px-6 lg:px-8 py-5 max-w-[1280px] w-full overflow-auto">
-            {visited.dashboard && <div className={tab === "dashboard" ? "h-full" : "hidden"}><DashboardPage /></div>}
-            {visited.predict && <div className={tab === "predict" ? "h-full" : "hidden"}><PredictTab server={server} /></div>}
-            {visited.metrics && <div className={tab === "metrics" ? "h-full" : "hidden"}><MetricsPage server={server} /></div>}
-            {visited.retrain && <div className={tab === "retrain" ? "h-full" : "hidden"}><RetrainTab server={server} onJobFinished={() => setReloadKey((k) => k + 1)} /></div>}
-            {visited.history && <div className={tab === "history" ? "h-full" : "hidden"}><HistoryTab server={server} reloadKey={reloadKey} /></div>}
-          </main>
-        </div>
+    <div className="h-screen overflow-hidden flex">
+      <Sidebar active={tab} onChange={setTab} />
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+        <TopBar server={server} setServer={setServer} health={health} modelName={modelName} />
+        <main className="flex-1 min-h-0 px-6 lg:px-8 py-5 max-w-[1280px] w-full overflow-auto">
+          {visited.dashboard && <div className={tab === "dashboard" ? "h-full" : "hidden"}><DashboardPage /></div>}
+          {visited.predict && <div className={tab === "predict" ? "h-full" : "hidden"}><PredictTab server={server} /></div>}
+          {visited.metrics && <div className={tab === "metrics" ? "h-full" : "hidden"}><MetricsPage server={server} /></div>}
+          {visited.retrain && <div className={tab === "retrain" ? "h-full" : "hidden"}><RetrainTab server={server} onJobFinished={() => setReloadKey((k) => k + 1)} /></div>}
+          {visited.history && <div className={tab === "history" ? "h-full" : "hidden"}><HistoryTab server={server} reloadKey={reloadKey} /></div>}
+          {visited.future && <div className={tab === "future" ? "h-full" : "hidden"}><FuturePage server={server} /></div>}
+        </main>
       </div>
-      {futureMounted && (
-        <div className={showFuture ? "" : "hidden"}>
-          <FuturePage server={server} onBack={() => setShowFuture(false)} />
-        </div>
-      )}
     </div>);
 
 }
