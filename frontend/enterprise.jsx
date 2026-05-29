@@ -572,8 +572,8 @@ const NAV_IDS = NAV.flatMap((s) => s.items.map((i) => i.id));
 /* ============================================================
  * MODEL METRICS (longitudinal)
  * ============================================================ */
-function MetricChart({ series, refLines = [], yMin, yMax, yUnit = "", xLabel, xTicks = [], xUnit = "", yNice = false }) {
-  const W = 620, H = 250, P = { l: 46, r: 14, t: 14, b: xTicks.length ? 44 : 34 };
+function MetricChart({ series, refLines = [], yMin, yMax, yUnit = "", xLabel, xTicks = [], xUnit = "", yNice = false, yLabel }) {
+  const W = 620, H = 250, P = { l: yLabel ? 60 : 46, r: 14, t: 14, b: xTicks.length ? 44 : 34 };
   const xs = series.flatMap(s => s.pts.map(p => p.x));
   const ys = series.flatMap(s => s.pts.map(p => p.y)).concat(refLines.map(r => r.y));
   if (!xs.length) return null;
@@ -617,17 +617,42 @@ function MetricChart({ series, refLines = [], yMin, yMax, yUnit = "", xLabel, xT
         );
       })}
       {xLabel && <text x={(P.l + W - P.r) / 2} y={H - 6} textAnchor="middle" fontSize="10.5" fill="var(--text-muted)">{xLabel}</text>}
+      {yLabel && <text x={14} y={(P.t + H - P.b) / 2} textAnchor="middle" fontSize="10.5" fill="var(--text-muted)" transform={`rotate(-90 14 ${(P.t + H - P.b) / 2})`}>{yLabel}</text>}
     </svg>
   );
 }
 
-function MetricStat({ label, value, sub, tone }) {
+function MetricStat({ label, value, sub, tone, plain }) {
   const col = tone === "ok" ? "var(--ok)" : tone === "warn" ? "var(--warn)" : "var(--text)";
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
       <div className="text-[11px] uppercase tracking-wider text-[var(--text-muted)] font-medium">{label}</div>
       <div className="mt-1 text-[20px] font-semibold tabular-nums" style={{ color: col }}>{value}</div>
       {sub && <div className="text-[11.5px] text-[var(--text-faint)] mt-0.5">{sub}</div>}
+      {plain && <div className="text-[11px] text-[var(--text-muted)] mt-1.5 leading-snug">{plain}</div>}
+    </div>
+  );
+}
+
+// One-line plain-English verdict on model health from calibration vs target.
+function ModelHealthChip({ coverageQ80 }) {
+  const d = Math.abs((coverageQ80 ?? 80) - 80);
+  const tone = d <= 8 ? "ok" : d <= 15 ? "warn" : "err";
+  const col = tone === "ok" ? "var(--ok)" : tone === "warn" ? "var(--warn)" : "var(--err)";
+  const verdict = tone === "ok" ? "Healthy" : tone === "warn" ? "Watch" : "Off-target";
+  const msg = tone === "ok"
+    ? "Confidence ranges are well calibrated — the model knows how sure it is."
+    : tone === "warn"
+      ? "Calibration is drifting from target — keep an eye on it."
+      : "Calibration is off — the confidence ranges can't be trusted yet.";
+  return (
+    <div className="flex items-center gap-3 rounded-lg border px-4 py-3" style={{ borderColor: col, background: "color-mix(in srgb, " + col + " 8%, var(--surface))" }}>
+      <StatusDot tone={tone} />
+      <div className="min-w-0">
+        <div className="text-[13px] font-semibold" style={{ color: col }}>Model health: {verdict}</div>
+        <div className="text-[11.5px] text-[var(--text-muted)] truncate">{msg}</div>
+      </div>
+      <HelpTip label="Model health" text="A quick verdict from how well the 80% confidence range is calibrated: Healthy = within 8 points of target, Watch = within 15, Off-target beyond that." className="ml-auto shrink-0" />
     </div>
   );
 }
@@ -643,8 +668,8 @@ function MetricsPage({ server }) {
     })();
   }, [server]);
 
-  if (err) return <div className="text-[13px] text-[var(--text-muted)]">Sem métricas. Corre <span className="font-mono">pipeline train</span> primeiro.</div>;
-  if (!data) return <div className="text-[13px] text-[var(--text-muted)]">A carregar métricas…</div>;
+  if (err) return <div className="text-[13px] text-[var(--text-muted)]">No metrics yet. Run <span className="font-mono">pipeline train</span> first.</div>;
+  if (!data) return <div className="text-[13px] text-[var(--text-muted)]">Loading metrics…</div>;
 
   const hist = data.history || [];
   const last = hist[hist.length - 1] || {};
@@ -658,20 +683,29 @@ function MetricsPage({ server }) {
     <div className="space-y-6">
       <PageHeader title="Model Metrics" subtitle="How the model improves as production data accumulates — and how honest its confidence stays." />
 
+      <ModelHealthChip coverageQ80={last.coverage_q80} />
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MetricStat label="Current error (MAE)" value={`${last.mae}s`} sub={`vs human limit ${floor}s`} />
-        <MetricStat label="Human noise floor" value={`${floor}s`} sub={`CV ${data.noise_floor_cv_pct}%`} tone="ok" />
-        <MetricStat label="Calibration 80%" value={`${last.coverage_q80}%`} sub="target 80%" tone={Math.abs(last.coverage_q80 - 80) <= 8 ? "ok" : "warn"} />
-        <MetricStat label="Training data" value={`${last.n_obs}`} sub={`${last.n_panels} panels`} />
+        <MetricStat label="Current error (MAE)" value={`${last.mae}s`} sub={`vs human limit ${floor}s`}
+          plain="How far off we usually are." />
+        <MetricStat label="Human noise floor" value={`${floor}s`} sub={`CV ${data.noise_floor_cv_pct}%`} tone="ok"
+          plain="The best a human could do — two people timing the same task disagree by about this much." />
+        <MetricStat label="Calibration 80%" value={`${last.coverage_q80}%`} sub="target 80%" tone={Math.abs(last.coverage_q80 - 80) <= 8 ? "ok" : "warn"}
+          plain="How often reality lands inside our predicted range. Target: about 8 in 10." />
+        <MetricStat label="Training data" value={`${last.n_obs}`} sub={`${last.n_panels} panels`}
+          plain="How many measurements the model has learned from." />
       </div>
 
       <Card padded={false}>
         <div className="px-5 pt-4">
-          <div className="text-[14px] font-semibold text-[var(--text)]">Accuracy vs data volume</div>
+          <div className="flex items-center gap-2">
+            <div className="text-[14px] font-semibold text-[var(--text)]">Accuracy vs data volume</div>
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-[var(--ok)]/40 text-[var(--ok)] bg-[var(--ok)]/10">lower is better</span>
+          </div>
           <div className="text-[12px] text-[var(--text-muted)] mt-0.5">Each panel of data lowers the error toward the human limit. Dashed = projection.</div>
         </div>
         <div className="px-3 pb-4 pt-2">
-          <MetricChart series={[accProj, accReal]} xLabel="training panels"
+          <MetricChart series={[accProj, accReal]} xLabel="training panels" yLabel="Error (seconds)"
             refLines={[{ y: floor, color: "var(--ok)", label: "human limit" }]} yUnit="s" />
         </div>
       </Card>
@@ -682,7 +716,7 @@ function MetricsPage({ server }) {
           <div className="text-[12px] text-[var(--text-muted)] mt-0.5">Confidence intervals stay honest as data grows (lines should hug the targets).</div>
         </div>
         <div className="px-3 pb-4 pt-2">
-          <MetricChart series={[covQ80, covQ90]} xLabel="training panels" yMin={50} yMax={100} yUnit="%"
+          <MetricChart series={[covQ80, covQ90]} xLabel="training panels" yLabel="Coverage (%)" yMin={50} yMax={100} yUnit="%"
             refLines={[{ y: 80, color: "var(--ok)", label: "80% target" }, { y: 90, color: "var(--accent-hover)", label: "90% target" }]} />
           <div className="px-2 mt-2 flex items-center gap-4 text-[11.5px] text-[var(--text-muted)]">
             <span className="inline-flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block" style={{ background: "var(--ok)" }} />80% interval</span>
