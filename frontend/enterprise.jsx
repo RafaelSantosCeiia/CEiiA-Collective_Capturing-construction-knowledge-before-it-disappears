@@ -203,41 +203,67 @@ function eExportCsv(items) {
   eDownloadFile(eBuildBatchCsv(items), "blufab-estimate.csv", "text/csv;charset=utf-8;");
 }
 
-function eExportPdf(items) {
+// Branded one-page quote per order: headline total + confidence range + ops table.
+function eExportPdf(items, opts = {}) {
   const JsPDF = window.jspdf && window.jspdf.jsPDF;
   if (!JsPDF) { alert("PDF library not loaded — check your connection and retry."); return; }
   const doc = new JsPDF({ unit: "pt", format: "a4" });
-  const M = 40; let y = M;
-  doc.setFontSize(15); doc.setTextColor(20, 20, 20);
-  doc.text("BluFab — Production time estimate", M, y); y += 16;
-  doc.setFontSize(9); doc.setTextColor(130, 130, 130);
-  doc.text(new Date().toLocaleString(), M, y); y += 14;
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 48;
   const success = items.filter(it => it.state === "success" && it.result);
-  for (const it of success) {
-    const label = (it.result.key || it.label || "order");
-    const total = eFormatSeconds(eItemTotalSec(it));
-    if (y > 740) { doc.addPage(); y = M; }
-    doc.setFontSize(11); doc.setTextColor(20, 20, 20);
-    doc.text(`${label}   —   ${total}`, M, y);
+  if (!success.length) return;
+  const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+
+  success.forEach((it, idx) => {
+    if (idx > 0) doc.addPage();
+    let y = M;
+    doc.setFillColor(37, 99, 235); doc.rect(0, 0, W, 6, "F");           // brand bar
+    doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(20, 20, 20);
+    doc.text("BluFab", M, y + 16);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
+    doc.text("Production time estimate", M, y + 32);
+    if (opts.modelName) doc.text("Model: " + opts.modelName, W - M, y + 32, { align: "right" });
+    y += 62;
+
+    const label = String(it.result.key || it.label || "order");
+    doc.setFontSize(9); doc.setTextColor(120, 120, 120); doc.text("ORDER", M, y);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.setTextColor(20, 20, 20);
+    doc.text(label, M, y + 17); y += 40;
+
+    const total = eItemTotalSec(it), rng = eItemRange(it);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(120, 120, 120);
+    doc.text("ESTIMATED TOTAL", M, y);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(26); doc.setTextColor(20, 20, 20);
+    doc.text(eFormatSeconds(total), M, y + 26);
+    if (rng) {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(90, 90, 90);
+      doc.text(`${eFmtLevelPct(rng.level)} confidence range:  ${eFormatSeconds(rng.lo)} – ${eFormatSeconds(rng.hi)}`, M, y + 44);
+    }
+    y += 64;
+
     const preds = (it.result.predictions || []).slice().sort((a, b) => (a.op_order || 0) - (b.op_order || 0));
-    const body = preds.map(p => [String(p.op_order ?? ""), String(p.op_id ?? ""), eFormatSeconds(p.predicted_duration_sec)]);
     doc.autoTable({
-      startY: y + 8,
-      head: [["#", "Operation", "Duration"]],
-      body,
-      styles: { fontSize: 9, cellPadding: 4 },
+      startY: y,
+      head: [["#", "Operation", "Duration", "Share"]],
+      body: preds.map(p => [
+        String(p.op_order ?? ""), String(p.op_id ?? ""),
+        eFormatSeconds(p.predicted_duration_sec),
+        (total ? (p.predicted_duration_sec / total * 100) : 0).toFixed(1) + "%",
+      ]),
+      styles: { fontSize: 9, cellPadding: 5 },
       headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-      columnStyles: { 0: { cellWidth: 36 }, 2: { halign: "right", cellWidth: 90 } },
+      columnStyles: { 0: { cellWidth: 32 }, 2: { halign: "right", cellWidth: 90 }, 3: { halign: "right", cellWidth: 64 } },
       margin: { left: M, right: M },
-      theme: "grid",
+      theme: "striped",
     });
-    y = doc.lastAutoTable.finalY + 20;
-  }
+
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(150, 150, 150);
+    doc.text(`Estimate valid as of ${today}.  Smart prediction based on past orders — not a guarantee.`, M, H - 32);
+  });
   doc.save("blufab-estimate.pdf");
 }
 
 function eBuildBatchCsv(items) {
-  const rows = ["order,op_id,op_order,predicted_duration_sec"];
+  const rows = ["order,op_id,op_order,predicted_duration_sec,lo_sec,hi_sec"];
   for (const it of items) {
     if (it.state !== "success" || !it.result) continue;
     const order =
@@ -254,7 +280,9 @@ function eBuildBatchCsv(items) {
           eCsvEscape(order),
           eCsvEscape(p.op_id),
           eCsvEscape(p.op_order ?? ""),
-          eCsvEscape(p.predicted_duration_sec ?? "")
+          eCsvEscape(p.predicted_duration_sec ?? ""),
+          eCsvEscape(p.lo_sec ?? ""),
+          eCsvEscape(p.hi_sec ?? "")
         ].join(",")
       );
     }
@@ -1071,6 +1099,15 @@ function eItemTotalSec(it) {
   return (it.result.predictions || []).reduce((a, p) => a + (p.predicted_duration_sec || 0), 0);
 }
 
+// Conformal confidence band for a result, if present.
+function eItemRange(it) {
+  const r = it && it.result;
+  if (r && typeof r.total_lo_sec === "number" && typeof r.total_hi_sec === "number")
+    return { lo: r.total_lo_sec, hi: r.total_hi_sec, level: r.interval_level };
+  return null;
+}
+function eFmtLevelPct(level) { return level ? level.replace(/^q/, "") + "%" : ""; }
+
 function UnifiedEntriesInput({ entries, onChange, disabled }) {
   const inputRef = useRefE(null);
   const pendingRowRef = useRefE(null);
@@ -1397,6 +1434,7 @@ function ResultCard({ item, onToggle, onRetry }) {
   const isMerged = Array.isArray(item.members) && item.members.length > 1;
   const opChip = item.kind === "pdf" && item.result && item.result.key ? item.result.key : null;
   const total = eItemTotalSec(item);
+  const rng = eItemRange(item);
   const preds = (item.result && item.result.predictions) || [];
   const warnings = (item.result && item.result.warnings) || [];
   const extracted = item.result && item.result.extracted;
@@ -1439,7 +1477,10 @@ function ResultCard({ item, onToggle, onRetry }) {
         <div className="shrink-0 text-right min-w-0 max-w-[40%]">
           {item.state === "running" && <RunningDots />}
           {item.state === "success" && (
-            <div className="text-[13.5px] font-medium text-[var(--text)] tabular-nums">{eFormatSeconds(total)}</div>
+            <div>
+              <div className="text-[13.5px] font-medium text-[var(--text)] tabular-nums">{eFormatSeconds(total)}</div>
+              {rng && <div className="text-[11px] text-[var(--text-muted)] tabular-nums">{eFormatSeconds(rng.lo)}–{eFormatSeconds(rng.hi)}{rng.level ? " · " + eFmtLevelPct(rng.level) : ""}</div>}
+            </div>
           )}
           {item.state === "error" && (
             <div className="text-[12.5px] text-[var(--err)] truncate">{eShortError(item.error, errCtx)}</div>
@@ -1453,6 +1494,22 @@ function ResultCard({ item, onToggle, onRetry }) {
 
       {expanded && item.state === "success" && (
         <div className="border-t border-[var(--border)]">
+          {/* headline: lead with the quotable number + confidence range */}
+          <div className="px-4 py-3 flex items-end justify-between gap-3 flex-wrap border-b border-[var(--border-soft)] bg-[var(--surface-2)]/20">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">Estimated total</div>
+              <div className="text-[26px] font-semibold text-[var(--text)] tabular-nums leading-tight">{eFormatSeconds(total)}</div>
+            </div>
+            {rng && (
+              <div className="text-right">
+                <div className="text-[11px] text-[var(--text-muted)] inline-flex items-center gap-1.5 justify-end">
+                  {eFmtLevelPct(rng.level)} confidence range
+                  <HelpTip label="Confidence range" text="A calibrated band around the estimate. At the 80% level, the real time lands inside this range about 8 times out of 10 (90% → 9 of 10). Wider band = less certain." />
+                </div>
+                <div className="text-[15px] text-[var(--text)] tabular-nums">{eFormatSeconds(rng.lo)} – {eFormatSeconds(rng.hi)}</div>
+              </div>
+            )}
+          </div>
           {warnings.length > 0 && (
             <div className="mx-4 my-3 flex items-start gap-2.5 px-4 py-3 rounded-lg border border-[var(--warn)]/30 bg-[var(--warn)]/8 text-[12.5px] text-[var(--text)]">
               <I.CircleAlert size={15} className="text-[var(--warn)] mt-0.5 shrink-0" />
@@ -1583,6 +1640,13 @@ function BatchSummaryBar({ items, onToggleAll, allCollapsed, onExportCsv, onExpo
   const error = items.filter(it => it.state === "error").length;
   const running = items.filter(it => it.state === "running" || it.state === "pending").length;
   const aggregateSec = items.reduce((a, it) => a + (it.state === "success" ? eItemTotalSec(it) : 0), 0);
+  // aggregate confidence band across successful orders (sum of per-order bands)
+  const ranges = items.filter(it => it.state === "success").map(eItemRange).filter(Boolean);
+  const aggRange = ranges.length ? {
+    lo: ranges.reduce((a, r) => a + r.lo, 0),
+    hi: ranges.reduce((a, r) => a + r.hi, 0),
+    level: ranges[0].level,
+  } : null;
 
   return (
     <Card padded={false}>
@@ -1617,6 +1681,9 @@ function BatchSummaryBar({ items, onToggleAll, allCollapsed, onExportCsv, onExpo
               <HelpTip label="Combined estimated time" text="All the per-order estimates added together — roughly how long all of these panels would take in total." />
             </div>
             <div className="mt-1 text-[18px] font-semibold text-[var(--text)] tabular-nums leading-none">{eFormatSeconds(aggregateSec)}</div>
+            {aggRange && (
+              <div className="mt-1 text-[11.5px] text-[var(--text-muted)] tabular-nums leading-none">{eFormatSeconds(aggRange.lo)}–{eFormatSeconds(aggRange.hi)} · {eFmtLevelPct(aggRange.level)} range</div>
+            )}
             {success > 0 && (
               <div className="mt-1 text-[11.5px] text-[var(--text-faint)] leading-none">estimated time for {success} {success === 1 ? "order" : "orders"}</div>
             )}
@@ -1723,7 +1790,9 @@ function PredictTab({ server }) {
     setItems(prev => prev.map(it => it.id === id ? (typeof patch === "function" ? patch(it) : { ...it, ...patch }) : it));
   }
 
-  function shouldStartCollapsed(totalCount) { return totalCount > 3; }
+  // Always start collapsed: the card header is the headline (total + range);
+  // the per-operation breakdown opens on demand.
+  function shouldStartCollapsed() { return true; }
 
   async function runOneItem(it) {
     try {
