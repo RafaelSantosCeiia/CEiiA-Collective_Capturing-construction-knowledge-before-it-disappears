@@ -523,14 +523,20 @@ const NAV = [
 /* ============================================================
  * MODEL METRICS (longitudinal)
  * ============================================================ */
-function MetricChart({ series, refLines = [], yMin, yMax, yUnit = "", xLabel }) {
-  const W = 620, H = 250, P = { l: 46, r: 14, t: 14, b: 34 };
+function MetricChart({ series, refLines = [], yMin, yMax, yUnit = "", xLabel, xTicks = [], xUnit = "", yNice = false }) {
+  const W = 620, H = 250, P = { l: 46, r: 14, t: 14, b: xTicks.length ? 44 : 34 };
   const xs = series.flatMap(s => s.pts.map(p => p.x));
   const ys = series.flatMap(s => s.pts.map(p => p.y)).concat(refLines.map(r => r.y));
   if (!xs.length) return null;
   const xmin = Math.min(...xs), xmax = Math.max(...xs);
-  const ymin = yMin != null ? yMin : Math.min(...ys) * 0.92;
-  const ymax = yMax != null ? yMax : Math.max(...ys) * 1.06;
+  let ymin = yMin != null ? yMin : Math.min(...ys) * 0.92;
+  let ymax = yMax != null ? yMax : Math.max(...ys) * 1.06;
+  if (yNice) {  // arredonda a múltiplos "limpos" para um eixo legível
+    const span = Math.max(1, ymax - ymin);
+    const step = Math.pow(10, Math.floor(Math.log10(span)));
+    ymin = Math.floor(ymin / step) * step;
+    ymax = Math.ceil(ymax / step) * step;
+  }
   const sx = x => P.l + (xmax === xmin ? 0.5 : (x - xmin) / (xmax - xmin)) * (W - P.l - P.r);
   const sy = y => H - P.b - (ymax === ymin ? 0.5 : (y - ymin) / (ymax - ymin)) * (H - P.t - P.b);
   const yticks = [ymin, (ymin + ymax) / 2, ymax];
@@ -541,6 +547,9 @@ function MetricChart({ series, refLines = [], yMin, yMax, yUnit = "", xLabel }) 
           <line x1={P.l} x2={W - P.r} y1={sy(t)} y2={sy(t)} stroke="var(--border-soft)" strokeWidth="1" />
           <text x={P.l - 6} y={sy(t) + 3} textAnchor="end" fontSize="10" fill="var(--text-faint)">{Math.round(t)}{yUnit}</text>
         </g>
+      ))}
+      {xTicks.map((t, i) => (
+        <text key={"x" + i} x={sx(t)} y={H - P.b + 14} textAnchor="middle" fontSize="10" fill="var(--text-faint)">{t}{xUnit}</text>
       ))}
       {refLines.map((r, i) => (
         <g key={"r" + i}>
@@ -984,7 +993,7 @@ function Sidebar({ active, onChange }) {
 /* ============================================================
  * TOP BAR
  * ============================================================ */
-function TopBar({ server, setServer, health, modelName }) {
+function TopBar({ server, setServer, health, modelName, onFuture }) {
   const tone = health === "ok" ? "ok" : health === "checking" ? "slate" : "err";
   const label = health === "ok" ? "Connected" : health === "checking" ? "Checking…" : "Disconnected";
   const healthTip = health === "ok"
@@ -1008,6 +1017,14 @@ function TopBar({ server, setServer, health, modelName }) {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {onFuture && (
+          <button onClick={onFuture}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[13px] text-[var(--accent-hover)] hover:bg-[var(--accent)]/20 transition-colors">
+            <I.Activity size={15} />
+            <span>Future Vision</span>
+            <I.ChevDown size={14} className="-rotate-90" />
+          </button>
+        )}
         <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-[var(--border)] bg-[var(--surface)]">
           <StatusDot tone={tone} />
           <span className="text-[13px] text-[var(--text)]">{label}</span>
@@ -2549,6 +2566,286 @@ function HistoryTab({ server, reloadKey }) {
 }
 
 /* ============================================================
+ * FUTURE VISION (separate page — fictitious data, what richer data unlocks)
+ * ============================================================ */
+function FutureSectionHead({ icon, title, note }) {
+  return (
+    <div className="flex items-start gap-2.5 mb-3">
+      <div className="mt-0.5 text-[var(--accent-hover)] shrink-0">{icon}</div>
+      <div>
+        <div className="text-[15px] font-semibold text-[var(--text)]">{title}</div>
+        {note && <div className="text-[12.5px] text-[var(--text-muted)] mt-0.5">{note}</div>}
+      </div>
+    </div>
+  );
+}
+
+function FutureBreakdownBar({ breakdown }) {
+  const seg = [
+    { key: "Productive", sec: breakdown.productive_sec, pct: breakdown.productive_pct, color: "var(--ok)" },
+    { key: "Material run (necessary)", sec: breakdown.material_necessary_sec, pct: breakdown.material_necessary_pct, color: "var(--warn)" },
+    { key: "Idle (no value)", sec: breakdown.idle_no_value_sec, pct: breakdown.idle_no_value_pct, color: "var(--err)" },
+  ];
+  return (
+    <div>
+      <div className="flex h-6 w-full overflow-hidden rounded-md border border-[var(--border)]">
+        {seg.map((s, i) => (
+          <div key={i} title={`${s.key}: ${s.pct}%`} style={{ width: `${s.pct}%`, background: s.color }} />
+        ))}
+      </div>
+      <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        {seg.map((s, i) => (
+          <div key={i} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ background: s.color }} />
+              <span className="text-[12px] text-[var(--text-muted)]">{s.key}</span>
+            </div>
+            <div className="mt-1 text-[16px] font-semibold text-[var(--text)] tabular-nums">{s.pct}%</div>
+            <div className="text-[11.5px] text-[var(--text-faint)] tabular-nums">{eFormatSeconds(s.sec)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FutureScenarioCards({ scenarios, unit }) {
+  const totals = scenarios.map(s => s.total_sec);
+  const best = Math.min(...totals), worst = Math.max(...totals);
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+      {scenarios.map((s, i) => {
+        const isBest = s.total_sec === best, isWorst = s.total_sec === worst;
+        const col = isBest ? "var(--ok)" : isWorst ? "var(--err)" : "var(--text)";
+        const deltaPct = best > 0 ? Math.round((s.total_sec - best) / best * 100) : 0;
+        return (
+          <div key={i} className="rounded-lg border bg-[var(--surface)] px-3 py-3"
+            style={{ borderColor: isBest ? "var(--ok)" : "var(--border)" }}>
+            <div className="text-[12px] text-[var(--text-muted)]">{s.label}</div>
+            <div className="mt-1 text-[18px] font-semibold tabular-nums" style={{ color: col }}>{eFormatSeconds(s.total_sec)}</div>
+            <div className="text-[11.5px] tabular-nums mt-0.5" style={{ color: col }}>
+              {isBest ? "best" : `+${deltaPct}% slower`}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FutureScenarioBlock({ icon, title, note, data, xLabel, xUnit = "" }) {
+  const pts = (data.curve && data.curve.length ? data.curve : data.scenarios)
+    .map(s => ({ x: Number(s.value), y: s.total_sec }));
+  const series = [{ pts, color: "var(--accent)" }];
+  const xv = pts.map(p => p.x);
+  const xTicks = xv.length ? [xv[0], xv[Math.floor(xv.length / 2)], xv[xv.length - 1]] : [];
+  return (
+    <Card className="mb-4">
+      <FutureSectionHead icon={icon} title={title} note={note} />
+      <FutureScenarioCards scenarios={data.scenarios} unit={data.unit} />
+      <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--bg)]/40 px-2 pt-3">
+        <MetricChart series={series} yUnit="s" xLabel={xLabel} xTicks={xTicks} xUnit={xUnit} yNice />
+      </div>
+    </Card>
+  );
+}
+
+function FutureGeneralResult({ general }) {
+  return (
+    <Card className="mb-4">
+      <FutureSectionHead
+        icon={<I.Layers size={18} />}
+        title="General model — predicted build time with waste exposed"
+        note="The central estimate now separates productive work from two kinds of waste this richer data reveals."
+      />
+      <div className="mb-4 flex flex-wrap items-end gap-x-6 gap-y-1">
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">Total</div>
+          <div className="text-[24px] font-semibold text-[var(--text)] tabular-nums leading-tight">{eFormatSeconds(general.total_sec)}</div>
+        </div>
+      </div>
+      <FutureBreakdownBar breakdown={general.breakdown} />
+      <div className="mt-4 flex items-start gap-2.5 px-4 py-3 rounded-lg border border-[var(--warn)]/30 bg-[var(--warn)]/8 text-[12.5px] text-[var(--text)]">
+        <I.Info size={15} className="text-[var(--warn)] mt-0.5 shrink-0" />
+        <div>
+          <span className="font-medium">Optimization signal:</span> the <span className="text-[var(--warn)] font-medium">material run</span> is
+          large and <span className="font-medium">consistent</span> (narrow interval) — a systematic loss you can cut by reorganizing
+          material flow / kitting closer to the bench. The <span className="text-[var(--err)] font-medium">no-value idle</span> is
+          <span className="font-medium"> random</span> (wide interval) — addressed through workflow discipline, not layout.
+        </div>
+      </div>
+      <FutureOpTable items={general.items} />
+    </Card>
+  );
+}
+
+function FutureOpRow({ it }) {
+  const waste = it.micro_op_num >= 15;
+  return (
+    <tr className="border-t border-[var(--border-soft)]">
+      <td className="px-4 py-2 text-[var(--text)]">
+        {waste && <span className="inline-block h-2 w-2 rounded-full mr-2 align-middle"
+          style={{ background: it.micro_op_num === 16 ? "var(--warn)" : "var(--err)" }} />}
+        <span className={waste ? "font-medium" : ""}>{it.micro_op_name}</span>
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-[var(--text)] font-medium">{eFormatSeconds(it.point_sec)}</td>
+      <td className="px-4 py-2 text-right tabular-nums text-[var(--text-muted)] text-[12px]">{eFormatSeconds(it.lo_sec)}–{eFormatSeconds(it.hi_sec)}</td>
+    </tr>
+  );
+}
+
+function FutureOpTable({ items }) {
+  const [open, setOpen] = useStateE(false);
+  const productive = items.filter(it => it.micro_op_num <= 14);
+  const waste = items.filter(it => it.micro_op_num >= 15);
+  return (
+    <div className="mt-4">
+      <button onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 text-[12.5px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors">
+        <I.ChevDown size={15} className={"transition-transform " + (open ? "" : "-rotate-90")} />
+        {open ? "Hide" : "Show"} per-operation detail ({items.length} steps)
+      </button>
+      {open && (
+        <div className="mt-3 overflow-hidden rounded-lg border border-[var(--border)]">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="bg-[var(--surface-2)] text-[var(--text-muted)] text-[11.5px] uppercase tracking-wider">
+                <th className="px-4 py-2 text-left font-medium">Micro-operation</th>
+                <th className="px-4 py-2 text-right font-medium">Estimate</th>
+                <th className="px-4 py-2 text-right font-medium">Interval</th>
+              </tr>
+            </thead>
+            <tbody>
+              {productive.map((it, i) => <FutureOpRow key={"p" + i} it={it} />)}
+              {waste.length > 0 && (
+                <tr className="border-t border-[var(--border)]">
+                  <td colSpan={3} className="px-4 py-1.5 bg-[var(--surface-2)]/60 text-[10.5px] uppercase tracking-wider text-[var(--text-faint)] font-medium">
+                    Waste — revealed by richer data
+                  </td>
+                </tr>
+              )}
+              {waste.map((it, i) => <FutureOpRow key={"w" + i} it={it} />)}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FuturePage({ server, onBack }) {
+  const [code, setCode] = useStateE("");
+  const [file, setFile] = useStateE(null);
+  const [loading, setLoading] = useStateE(false);
+  const [result, setResult] = useStateE(null);
+  const [error, setError] = useStateE(null);
+  const fileRef = useRefE(null);
+
+  async function run() {
+    setError(null);
+    if (!code.trim() && !file) { setError("Enter a panel code (e.g. PG02K) or attach a process PDF."); return; }
+    setLoading(true); setResult(null);
+    try {
+      let data;
+      if (file) {
+        const fd = new FormData(); fd.append("file", file);
+        data = await eApiMultipart(server, "/future/predict/pdf", fd);
+      } else {
+        data = await eApi(server, "/future/predict", { method: "POST", body: { key: code.trim() } });
+      }
+      setResult(data);
+    } catch (e) {
+      setError(eErrorMessage(e, file ? "predict-pdf" : "predict"));
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <div className="h-screen overflow-auto bg-[var(--bg)]">
+      {/* standalone top bar (no sidebar) */}
+      <div className="h-[60px] border-b border-[var(--border)] flex items-center gap-3 px-6 sticky top-0 bg-[var(--bg)] z-20">
+        <button onClick={onBack}
+          className="flex items-center gap-1.5 h-9 px-3 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[13px] text-[var(--text)] hover:border-[var(--accent)] transition-colors">
+          <I.ChevDown size={15} className="rotate-90" /> Back
+        </button>
+        <div className="flex items-center gap-2">
+          <I.Activity size={17} className="text-[var(--accent-hover)]" />
+          <span className="text-[14px] font-semibold text-[var(--text)]">Future Vision</span>
+          <span className="text-[11px] px-2 py-0.5 rounded-full border border-[var(--accent)]/40 text-[var(--accent-hover)] bg-[var(--accent)]/10">demo · fictitious data</span>
+        </div>
+      </div>
+
+      <div className="px-6 lg:px-8 py-6 max-w-[1100px] mx-auto">
+        <div className="mb-5">
+          <h1 className="text-[20px] font-semibold text-[var(--text)]">What richer data unlocks</h1>
+          <p className="text-[13.5px] text-[var(--text-muted)] mt-1 max-w-[760px]">
+            A glimpse of the future of this project, built on <span className="text-[var(--text)] font-medium">fictitious data</span>.
+            With more and richer measurements we can surface actionable patterns the current model can't see: hidden waste, and how
+            <span className="text-[var(--text)]"> temperature</span>, <span className="text-[var(--text)]">operator experience</span> and
+            <span className="text-[var(--text)]"> time of day</span> shift productivity. The central estimate uses the general model;
+            the panels below show how each variable would move the time.
+          </p>
+        </div>
+
+        <Card className="mb-5">
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+            <div className="flex-1">
+              <label className="text-[11px] uppercase tracking-wider text-[var(--text-muted)] font-medium">Panel code</label>
+              <input
+                value={code}
+                onChange={(e) => { setCode(e.target.value); if (e.target.value) setFile(null); }}
+                placeholder="e.g. PG02K"
+                spellCheck={false}
+                className="mt-1 w-full h-10 px-3 rounded-md bg-[var(--surface)] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[14px] text-[var(--text)] placeholder:text-[var(--text-faint)] font-mono" />
+            </div>
+            <div className="text-[12px] text-[var(--text-faint)] pb-2.5 text-center">or</div>
+            <div className="flex-1">
+              <label className="text-[11px] uppercase tracking-wider text-[var(--text-muted)] font-medium">Process PDF</label>
+              <div className="mt-1 flex items-center gap-2">
+                <button onClick={() => fileRef.current && fileRef.current.click()}
+                  className="flex items-center gap-2 h-10 px-3 rounded-md bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors text-[13px] text-[var(--text)]">
+                  <I.FileUp size={15} className="text-[var(--text-faint)]" />
+                  {file ? "Change file" : "Choose file"}
+                </button>
+                {file && <span className="text-[12px] text-[var(--text-muted)] truncate max-w-[180px]">{file.name}</span>}
+                <input ref={fileRef} type="file" accept=".pdf" className="hidden"
+                  onChange={(e) => { const f = e.target.files[0]; if (f) { setFile(f); setCode(""); } }} />
+              </div>
+            </div>
+            <button onClick={run} disabled={loading}
+              className="h-10 px-5 rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-white text-[13px] font-medium flex items-center gap-2 transition-colors">
+              {loading ? <I.Loader size={15} className="animate-spin" /> : <I.Calculator size={15} />}
+              {loading ? "Predicting…" : "Predict future"}
+            </button>
+          </div>
+          {error && (
+            <div className="mt-3 flex items-start gap-2.5 px-4 py-3 rounded-lg border border-[var(--err)]/30 bg-[var(--err)]/8 text-[13px] text-[var(--text)]">
+              <I.CircleAlert size={16} className="text-[var(--err)] mt-0.5 shrink-0" />
+              <div>{typeof error === "string" ? error : "Prediction failed."}</div>
+            </div>
+          )}
+        </Card>
+
+        {result && (
+          <div>
+            <div className="mb-3 text-[13px] text-[var(--text-muted)]">
+              Panel <span className="font-mono text-[var(--text)]">{result.panel_id}</span>
+              {result.n_panels > 1 && <span> · {result.n_panels} sub-panels aggregated</span>}
+            </div>
+            <FutureGeneralResult general={result.general} />
+            <FutureScenarioBlock icon={<I.Activity size={18} />} title="Temperature — ambient comfort"
+              note={result.temperature.note} data={result.temperature} xLabel="Temperature (°C)" xUnit="°" />
+            <FutureScenarioBlock icon={<I.BadgeCheck size={18} />} title="Operator experience"
+              note={result.experience.note} data={result.experience} xLabel="Experience (months)" xUnit="mo" />
+            <FutureScenarioBlock icon={<I.Clock size={18} />} title="Time of day"
+              note={result.timeofday.note} data={result.timeofday} xLabel="Hour of day" xUnit="h" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
  * ROOT
  * ============================================================ */
 function EnterpriseApp() {
@@ -2557,6 +2854,17 @@ function EnterpriseApp() {
   const [health, setHealth] = useStateE("checking");
   const [modelName, setModelName] = useStateE("");
   const [reloadKey, setReloadKey] = useStateE(0);
+  const [showFuture, setShowFuture] = useStateE(false);
+  // keep-alive: a tab mounts on first visit and stays mounted (hidden via CSS),
+  // so predictions, training jobs, etc. survive switching tabs. FuturePage too.
+  const [visited, setVisited] = useStateE({ dashboard: true });
+  const [futureMounted, setFutureMounted] = useStateE(false);
+
+  useEffectE(() => {
+    setVisited((v) => (v[tab] ? v : { ...v, [tab]: true }));
+  }, [tab]);
+
+  function openFuture() { setFutureMounted(true); setShowFuture(true); }
 
   useEffectE(() => {
     let cancelled = false;
@@ -2581,20 +2889,25 @@ function EnterpriseApp() {
   }, [server, reloadKey]);
 
   return (
-    <div className="h-screen overflow-hidden flex">
-      <Sidebar active={tab} onChange={setTab} />
-      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-        <TopBar server={server} setServer={setServer} health={health} modelName={modelName} />
-        <main className="flex-1 min-h-0 px-6 lg:px-8 py-5 max-w-[1280px] w-full overflow-auto">
-          <div key={tab} className="h-full">
-            {tab === "dashboard" && <DashboardPage />}
-            {tab === "predict" && <PredictTab server={server} />}
-            {tab === "metrics" && <MetricsPage server={server} />}
-            {tab === "retrain" && <RetrainTab server={server} onJobFinished={() => setReloadKey((k) => k + 1)} />}
-            {tab === "history" && <HistoryTab server={server} reloadKey={reloadKey} />}
-          </div>
-        </main>
+    <div className="h-screen overflow-hidden">
+      <div className={"h-full flex " + (showFuture ? "hidden" : "")}>
+        <Sidebar active={tab} onChange={setTab} />
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+          <TopBar server={server} setServer={setServer} health={health} modelName={modelName} onFuture={openFuture} />
+          <main className="flex-1 min-h-0 px-6 lg:px-8 py-5 max-w-[1280px] w-full overflow-auto">
+            {visited.dashboard && <div className={tab === "dashboard" ? "h-full" : "hidden"}><DashboardPage /></div>}
+            {visited.predict && <div className={tab === "predict" ? "h-full" : "hidden"}><PredictTab server={server} /></div>}
+            {visited.metrics && <div className={tab === "metrics" ? "h-full" : "hidden"}><MetricsPage server={server} /></div>}
+            {visited.retrain && <div className={tab === "retrain" ? "h-full" : "hidden"}><RetrainTab server={server} onJobFinished={() => setReloadKey((k) => k + 1)} /></div>}
+            {visited.history && <div className={tab === "history" ? "h-full" : "hidden"}><HistoryTab server={server} reloadKey={reloadKey} /></div>}
+          </main>
+        </div>
       </div>
+      {futureMounted && (
+        <div className={showFuture ? "" : "hidden"}>
+          <FuturePage server={server} onBack={() => setShowFuture(false)} />
+        </div>
+      )}
     </div>);
 
 }

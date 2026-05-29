@@ -213,6 +213,76 @@ async def predict_drawing_raw(
 
 
 # ===========================================================================
+# FUTURE — visão de futuro com dados FICTÍCIOS (4 modelos sintéticos)
+# Subsistema paralelo; não toca no pipeline/modelo real.
+# ===========================================================================
+@app.get("/future/models")
+def future_models(_auth=Depends(require_token)):
+    """Metadados dos 4 modelos future (general/temperature/experience/timeofday)."""
+    try:
+        from .future.predict import models_meta
+        return {"models": models_meta()}
+    except FileNotFoundError as e:
+        raise HTTPException(503, f"{e}")
+
+
+@app.post("/future/predict")
+def future_predict_by_key(body: dict = Body(...), _auth=Depends(require_token)):
+    """Previsão future por código de painel em cache (general + cenários)."""
+    key = (body.get("key") or "").strip().upper()
+    level = body.get("level", "q80")
+    if not key:
+        raise HTTPException(422, "Falta 'key' (código do painel, ex.: PG02K).")
+    if not CACHE.exists():
+        raise HTTPException(503, "Sem cache de geometria.")
+    cache = pd.read_parquet(CACHE)
+    hit = cache[cache.panel_id.str.upper() == key]
+    if hit.empty:
+        raise HTTPException(404, f"Painel '{key}' não está em cache. Usa upload de PDF (/future/predict/pdf).")
+    geom = hit.iloc[0].to_dict(); geom["panel_id"] = key
+    try:
+        from .future.predict import predict_future
+        out = predict_future(geom, level=level)
+    except FileNotFoundError as e:
+        raise HTTPException(503, f"{e}")
+    out["n_panels"] = 1; out["panel_ids"] = [key]
+    return out
+
+
+@app.post("/future/predict/pdf")
+async def future_predict_pdf(
+    file: UploadFile = File(...),
+    level: str = Query("q80", description="q80 | q90"),
+    _auth=Depends(require_token),
+):
+    """Previsão future por upload de PDF (geometria via cache; agrega multi-painel)."""
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(415, "Envia um ficheiro .pdf")
+    from .predict_drawing import _geometry_from_cache
+    from .extraction.splitter import split_pdf
+    from .future.predict import predict_future_project
+    data = await file.read()
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=True) as tmp:
+        tmp.write(data); tmp.flush()
+        chunks = split_pdf(Path(tmp.name))
+    cache = pd.read_parquet(CACHE) if CACHE.exists() else pd.DataFrame(columns=["panel_id"])
+    geoms, missing = [], []
+    for c in chunks:
+        g = _geometry_from_cache(c.panel_id, c.project_id, cache)
+        (geoms.append(g) if g else missing.append(c.panel_id))
+    if not geoms:
+        raise HTTPException(422, "Sem geometria em cache para os painéis deste PDF. "
+                                 "Esta demo (futuro) usa painéis já extraídos.")
+    try:
+        out = predict_future_project(geoms, level=level)
+    except FileNotFoundError as e:
+        raise HTTPException(503, f"{e}")
+    out["panels_without_geometry"] = missing
+    out["filename"] = file.filename
+    return out
+
+
+# ===========================================================================
 # RETRAIN — jobs assíncronos (n8n: POST /retrain → poll GET /retrain/{job_id})
 # ===========================================================================
 JOBS: dict[str, dict] = {}              # estado em memória (polling)

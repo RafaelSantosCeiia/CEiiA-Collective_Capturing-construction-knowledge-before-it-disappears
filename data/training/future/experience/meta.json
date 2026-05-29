@@ -1,0 +1,81 @@
+{
+  "name": "experience",
+  "champion": "catboost",
+  "extra_cols": [
+    "experiencia_meses"
+  ],
+  "design_cols": [
+    "largura_painel_mm",
+    "altura_painel_mm",
+    "profundidade_painel_mm",
+    "largura_perfil_mm",
+    "espessura_perfil_mm",
+    "num_montantes",
+    "num_raias",
+    "comprimento_montante_mm",
+    "comprimento_raia_mm",
+    "num_furos_raia",
+    "num_placas_por_face",
+    "perimetro_placa_total_mm",
+    "perimetro_placa_maior_mm",
+    "espessura_placa_mm",
+    "experiencia_meses",
+    "micro_op_num_1",
+    "micro_op_num_2",
+    "micro_op_num_3",
+    "micro_op_num_4",
+    "micro_op_num_5",
+    "micro_op_num_6",
+    "micro_op_num_7",
+    "micro_op_num_8",
+    "micro_op_num_9",
+    "micro_op_num_10",
+    "micro_op_num_11",
+    "micro_op_num_12",
+    "micro_op_num_13",
+    "micro_op_num_14"
+  ],
+  "conformal": {
+    "q80": {
+      "__global__": 0.3131470292882413,
+      "1": 0.3166322309411468,
+      "2": 0.3041404047918682,
+      "3": 0.29824247609051474,
+      "4": 0.3207720021169589,
+      "5": 0.29128276356003613,
+      "6": 0.3332002523261065,
+      "7": 0.3416018991370724,
+      "8": 0.3373576213822911,
+      "9": 0.29318975541332826,
+      "10": 0.34512275201925013,
+      "11": 0.3064018848287849,
+      "12": 0.30212479963914274,
+      "13": 0.30307870888857213,
+      "14": 0.37053245680401387
+    },
+    "q90": {
+      "__global__": 0.43719140789933025,
+      "1": 0.44121267113129464,
+      "2": 0.4825039183855126,
+      "3": 0.4216938546114575,
+      "4": 0.4185993215710318,
+      "5": 0.378952562013554,
+      "6": 0.4502289613021231,
+      "7": 0.4747314999928889,
+      "8": 0.4701339193948064,
+      "9": 0.36802422598434636,
+      "10": 0.5157265228057994,
+      "11": 0.39721222539739803,
+      "12": 0.4099648480623417,
+      "13": 0.4226514215984998,
+      "14": 0.48252227918981894
+    }
+  },
+  "noise_floor": {
+    "mae": 6.210301999587714,
+    "cv_median_pct": 24.847209284303936,
+    "n_pairs": 3528
+  },
+  "lopo_mae": 5.7252643312447935,
+  "n_train_obs": 3528
+}
