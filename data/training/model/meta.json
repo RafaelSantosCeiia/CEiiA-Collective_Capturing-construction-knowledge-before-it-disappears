@@ -1,0 +1,98 @@
+{
+  "champion": "catboost",
+  "cv_mae": 15.626668856709301,
+  "design_cols": [
+    "largura_painel_mm",
+    "altura_painel_mm",
+    "profundidade_painel_mm",
+    "largura_perfil_mm",
+    "espessura_perfil_mm",
+    "num_montantes",
+    "num_raias",
+    "comprimento_montante_mm",
+    "comprimento_raia_mm",
+    "num_furos_raia",
+    "num_placas_por_face",
+    "perimetro_placa_total_mm",
+    "perimetro_placa_maior_mm",
+    "espessura_placa_mm",
+    "micro_op_num_1",
+    "micro_op_num_2",
+    "micro_op_num_3",
+    "micro_op_num_4",
+    "micro_op_num_5",
+    "micro_op_num_6",
+    "micro_op_num_7",
+    "micro_op_num_8",
+    "micro_op_num_9",
+    "micro_op_num_10",
+    "micro_op_num_11",
+    "micro_op_num_12",
+    "micro_op_num_13",
+    "micro_op_num_14"
+  ],
+  "conformal": {
+    "q80": {
+      "__global__": 0.7073213420659257,
+      "1": 0.8020283484811551,
+      "2": 1.0680255126860148,
+      "3": 1.8540358859237738,
+      "4": 0.6198929154481378,
+      "5": 0.4909286618190812,
+      "6": 0.6843532976036002,
+      "7": 0.9540913614467655,
+      "8": 1.0695843809892622,
+      "9": 0.7297710828692608,
+      "10": 0.802037522257123,
+      "11": 0.4616891071451311,
+      "12": 0.7073213420659257,
+      "13": 0.5654530880106226,
+      "14": 0.6682267666902131
+    },
+    "q90": {
+      "__global__": 1.0695843809892622,
+      "1": 1.1058258284206772,
+      "2": 1.7022622932627685,
+      "3": 2.8551511601417,
+      "4": 1.8879664666321414,
+      "5": 0.7261359287006128,
+      "6": 1.0177850619804525,
+      "7": 1.5635075698058831,
+      "8": 1.6550440511287128,
+      "9": 1.3263219482354673,
+      "10": 3.575076339543127,
+      "11": 0.5594751836105879,
+      "12": 1.5177335025302503,
+      "13": 1.7891006017615303,
+      "14": 0.6682267666902131
+    }
+  },
+  "conformal_coverage": {
+    "q80": {
+      "coverage_pct": 81.58640226628894,
+      "mean_width_sec": 56.23700465052844
+    },
+    "q90": {
+      "coverage_pct": 91.21813031161473,
+      "mean_width_sec": 96.93297926839236
+    }
+  },
+  "features": [
+    "largura_painel_mm",
+    "altura_painel_mm",
+    "profundidade_painel_mm",
+    "largura_perfil_mm",
+    "espessura_perfil_mm",
+    "num_montantes",
+    "num_raias",
+    "comprimento_montante_mm",
+    "comprimento_raia_mm",
+    "num_furos_raia",
+    "num_placas_por_face",
+    "perimetro_placa_total_mm",
+    "perimetro_placa_maior_mm",
+    "espessura_placa_mm"
+  ],
+  "n_train_obs": 353,
+  "deployed_at": "2026-05-29T10:42:50.349589+00:00"
+}

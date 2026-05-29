@@ -1,2 +1,0 @@
-panel_id,is_id,project_id,drawing_revision,largura_painel_mm,altura_painel_mm,profundidade_painel_mm,largura_perfil_mm,espessura_perfil_mm,num_montantes,num_raias,comprimento_montante_mm,comprimento_raia_mm,num_furos_raia,num_placas_por_face,perimetro_placa_total_mm,perimetro_placa_maior_mm,espessura_placa_mm,placagem_dupla,tem_entalhes,codigo_painel,e_tecto,e_pavimento,e_porta,e_zona_humida
-PG02K,IS01A,PICUALT9,A,1208,2224,46,46,0.9,4,2,2222,1208,0,2,13962,6981,12.5,True,False,PG,False,False,False,False

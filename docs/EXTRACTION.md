@@ -10,9 +10,13 @@ Cada sub-painel ECOCIAF tem 2–4 páginas no PDF de processo (`ECOCIAF01_PANCAS
 
 ## Modelo escolhido — **Gemini 3.5 Flash**
 
-Validado contra 3 painéis (PG02K, PCT01K, PT01K) com inspecção manual: **acurácia ~100% nas features extraídas**. Latência ~13 s/painel, custo ~$0,0003/painel.
+Provider default. Inspecção manual contra um punhado de painéis (PG02K, PCT01K, …)
+mostrou boa fidelidade às cotas do desenho. Latência ~13 s/painel, custo
+~$0,0003/painel. Para os ~21 sub-painéis ECOCIAF: poucos minutos, ~$0,007 total.
 
-Para os 22 painéis do ECOCIAF: **~5 min total, custo ~$0,007**.
+> **Heurístico/inferido:** a extração é validada pelo schema Pydantic (tipos +
+> limites físicos), mas os valores não foram auditados campo-a-campo contra todos
+> os desenhos. Tratar como "inferido com validação de sanidade", não "verdade".
 
 ## Providers suportados
 
@@ -52,12 +56,6 @@ ollama pull qwen2.5vl:7b
 
 # Re-extrair (overwrite) painéis já no parquet
 ./scripts/pipeline extract-geometry --overwrite
-
-# Benchmark dos providers
-./scripts/pipeline benchmark-extractors \
-    --providers gemini,claude,ollama \
-    --panels PG02K,PCT01K,PT01K \
-    --output data/training/benchmark_extractors.json
 ```
 
 ## Schema de saída — `panel_geometry.parquet`

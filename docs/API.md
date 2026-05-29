@@ -1,150 +1,190 @@
-# HTTP API
+# API HTTP — contrato para o frontend e n8n
 
-FastAPI wrapper around the pipeline, intended for n8n (retrain orchestration)
-and direct service-to-service calls (predict).
+Envolve o pipeline de previsão e o retreino. O que a API devolve nas previsões é
+exatamente o que o CLI `predict-drawing` produz.
 
-## Running
+## Arrancar
 
 ```bash
 pip install -r requirements.txt
-./scripts/api                       # binds 0.0.0.0:8000
-./scripts/api 127.0.0.1 8080        # custom host/port
+export GEMINI_API_KEY=...      # ou põe no .env (carregado automaticamente)
+PYTHONPATH=src python -m uvicorn pipeline.api:app --host 127.0.0.1 --port 8000
 ```
 
-Interactive docs are auto-generated at `http://<host>:<port>/docs`
-(Swagger UI) and `/redoc`.
+Docs interativos (Swagger) em `http://<host>:<port>/docs`.
+
+## Autenticação (opcional)
+
+Controlada pela variável `API_KEY` no `.env`:
+
+- **`API_KEY` vazio** → sem auth (uso local).
+- **`API_KEY` preenchido** → todos os endpoints (exceto `/health`) exigem o header
+  `X-API-Key: <valor>`. Usa isto **sempre que expões a API por túnel** (cloudflared/ngrok),
+  porque os dados são confidenciais (Casais).
+
+```bash
+curl -H "X-API-Key: <a-tua-chave>" http://127.0.0.1:8000/model
+```
+
+No frontend a chave é guardada no browser (localStorage `blufab_api_key`); no n8n
+adiciona o header `X-API-Key` em cada nó HTTP Request (ou uma credencial Header Auth).
 
 ## Endpoints
 
-| Method | Path                  | Purpose                                    | Sync? |
-|--------|-----------------------|--------------------------------------------|-------|
-| GET    | `/health`             | Liveness probe                             | yes   |
-| GET    | `/model`              | Deployed model metadata                    | yes   |
-| POST   | `/predict`            | Predict per-op durations for one order     | yes   |
-| POST   | `/retrain`            | Kick off retrain → returns `job_id`        | **async** |
-| GET    | `/retrain/{job_id}`   | Status of a retrain job                    | yes   |
-| GET    | `/retrain/log`        | Tail of `retrain_log.jsonl`                | yes   |
+| Método | Rota | Para quê |
+|---|---|---|
+| GET | `/health` | liveness (sem auth) |
+| GET | `/model` | metadados do campeão (confiança na UI) |
+| GET | `/metrics` | métricas longitudinais (learning curve, calibração, projeção) |
+| POST | `/predict/pdf` | upload de PDF → previsão (forma do frontend) |
+| POST | `/predict` | previsão por código de painel já em cache (`{key}`) |
+| POST | `/predict-drawing` | upload de PDF → previsão (forma crua, igual ao CLI) |
+| POST | `/retrain` (alias `/train`) | arranca um retreino assíncrono → `job_id` |
+| GET | `/retrain/{job_id}` | estado de um job (poll) |
+| GET | `/retrain/log` | histórico dos retreinos |
+| GET | `/schedule` | próximo retreino automático |
+| POST | `/schedule` | regista o agendamento (aceita `cron`) |
 
-### `POST /predict`
+---
 
-```json
-{ "key": "OP-2026-001", "prefer": "skops" }
-```
-
-Response:
+### `GET /model`
 ```json
 {
-  "key": "OP-2026-001",
-  "predictions": [
-    { "op_id": "op001", "op_order": "0", "predicted_duration_sec": 18.65 },
-    ...
-  ],
-  "total_sec": 312.4,
-  "warnings": []
+  "champion": "catboost",
+  "cv_mae_sec": 16.5,
+  "n_train_obs": 315,
+  "conformal_coverage": {
+    "q80": {"coverage_pct": 83.5, "mean_width_sec": 56.3},
+    "q90": {"coverage_pct": 93.0, "mean_width_sec": 106.2}
+  },
+  "features": ["largura_painel_mm", "..."]
 }
 ```
+Usa o `conformal_coverage` para mostrar "intervalo 80% → cobre 83% (calibrado)".
 
-Returns `404` if the key is unknown, `503` if no model is deployed.
+### `GET /metrics`
+Lê `data/training/metrics.json` (gerado pelo `train`). Contém `noise_floor`,
+`history` (MAE + cobertura por nº de painéis) e `projection` (extrapolação).
+`404` se ainda não houver métricas → corre `pipeline train`.
 
 ### `POST /predict/pdf`
+`multipart/form-data` com `file` (PDF). Query: `provider` (`gemini`|`cache`|`claude`|`ollama`),
+`level` (`q80`|`q90`). Devolve a forma do frontend: `{key, predictions[], total_sec,
+total_lo_sec, total_hi_sec, panels[], extracted, warnings}`.
 
-`multipart/form-data` upload. Extracts the `op_producao` identifier from the
-PDF text (looks for `OP-YYYY-NNN` patterns on every page) and runs the same
-prediction.
+### `POST /predict`
+Previsão rápida por código de painel já presente na cache de geometria.
+```json
+{ "key": "PG02K", "level": "q80" }
+```
+`404` se o painel não estiver em cache (usa `/predict/pdf`).
+
+### `POST /predict-drawing`
+`multipart/form-data` com `file` (PDF). Query: `provider`, `level`. Forma crua:
 
 ```bash
-curl -X POST http://api/predict/pdf -F "file=@BOM_OP_2026_001.pdf"
+curl -F "file=@ISCTE_PG01K.pdf" \
+  "http://127.0.0.1:8000/predict-drawing?provider=gemini&level=q80"
 ```
-
-Response is the same as `/predict` plus an `extracted` object with the panel
-attributes parsed from the PDF (panel_id, dimensions, material, etc.).
-
-Error codes:
-- `415` — file isn't a `.pdf`.
-- `422` — PDF parsed but no `OP-…` identifier found in any page.
-- `404` — identifier found, but that production order isn't in the features
-  database (ingest the order and run `pipeline run-all` first).
-
-### `POST /retrain`
-
 ```json
-{ "trials": 80, "require_improvement": true, "skip_benchmark": false, "skip_tests": false }
+{
+  "project_id": "ISCTE", "interval_level": "q80", "n_panels": 1,
+  "project_total_sec": 383.0, "project_total_lo_sec": 62.0, "project_total_hi_sec": 760.0,
+  "panels": [
+    {
+      "panel_id": "PG01K", "total_sec": 383.0, "total_lo_sec": 62.0, "total_hi_sec": 760.0,
+      "micro_ops": [
+        {"micro_op_num": 1, "micro_op_name": "Pegar nos perfis",
+         "point_sec": 20.2, "lo_sec": 5.4, "hi_sec": 34.9}
+      ]
+    }
+  ],
+  "panels_without_geometry": []
+}
 ```
+Tempos em **segundos**. `lo_sec`/`hi_sec` = intervalo conformal calibrado.
+Total do painel = soma das micro-ops; total do projeto = soma dos painéis.
 
-**Dry run** — for testing orchestration (e.g. an n8n workflow) without
-running the real benchmark for 30+ minutes. Sleeps `dry_run_seconds`, then
-returns a simulated outcome with no side effects:
+---
 
+## Retreino (assíncrono) — fluxo n8n
+
+`POST /retrain` arranca um job em background e devolve já o `job_id`. O retreino real
+demora ~30 min; faz-se **poll** a `GET /retrain/{job_id}` até o `status` ser terminal.
+
+### `POST /retrain` (ou `/train`)
+Body (tudo opcional):
 ```json
 {
   "dry_run": true,
-  "dry_run_outcome": "deployed",       // or "rejected" | "failed"
-  "dry_run_seconds": 15
+  "dry_run_outcome": "deployed",
+  "dry_run_seconds": 15,
+  "trials": 80,
+  "require_improvement": true
 }
 ```
+- **`dry_run`** — simula sem treinar (para testar o fluxo). `dry_run_outcome` =
+  `deployed` | `rejected` | `failed`; `dry_run_seconds` = 1–120.
+- **Retreino real** (`dry_run` ausente/false): `trials` (Optuna), `require_improvement`
+  (gate de segurança). Só corre **um** de cada vez (2.º pedido → `409`).
 
-The simulator populates `status`, `deployed`, `train_report`, `error` and
-`stderr_tail` exactly the same way the real retrain does, so downstream
-branching logic can be validated end-to-end.
-
-Response (HTTP 202):
+Resposta imediata:
 ```json
-{ "job_id": "a1b2c3d4e5f6", "status": "running" }
+{ "job_id": "job_xxxx", "status": "running", "deployed": null, "started_at": "...", "params": {...} }
 ```
 
-Retrain runs in a background thread. Poll `/retrain/{job_id}` for status:
-
+### `GET /retrain/{job_id}`
 ```json
 {
-  "job_id": "a1b2c3d4e5f6",
-  "status": "completed",
-  "started_at": "2026-05-27T09:12:31",
-  "finished_at": "2026-05-27T09:38:04",
+  "job_id": "job_xxxx",
+  "status": "deployed",          // running | deployed | rejected | failed
   "deployed": true,
-  "train_report": { "model_name": "...", "mae": 1.42, ... }
+  "started_at": "...", "finished_at": "...",
+  "train_report": {"model_name": "catboost", "mae": 16.5}
 }
 ```
+Em falha: `status: "failed"`, `error`, `stderr_tail`.
 
-Status values: `running`, `completed`, `failed`. On failure, fields `error`,
-`stderr_tail`, `stdout_tail` are populated for debugging.
+### `GET /retrain/log?limit=20`
+```json
+{ "items": [ { "job_id": "...", "status": "deployed", "train_report": {...} } ], "count": 1 }
+```
+Inclui jobs em memória ainda a correr. Persistido em `data/training/retrain_jobs.json`.
 
-> ⚠️ Jobs live in process memory. Restarting the API forgets prior `job_id`s.
-> The authoritative audit trail lives in `data/training/retrain_log.jsonl`
-> (read via `/retrain/log`).
+### Exemplo de workflow n8n
+1. **Start Retrain** — `POST {base}/retrain` com o body acima → guarda `job_id`.
+2. **Wait** (ex. 30s).
+3. **Poll Status** — `GET {base}/retrain/{{ $('Start Retrain').item.json.job_id }}`.
+4. **IF** `status == "running"` → volta ao Wait; senão ramifica por `deployed`/`rejected`/`failed`.
 
-## n8n workflow for monthly retrain
+> Em cada nó HTTP Request: se a API tiver `API_KEY`, adiciona o header `X-API-Key`;
+> caso contrário, `Authentication = None`.
 
-Five-node workflow:
+---
 
-1. **Cron** — `0 2 1 * *` (02:00 on the 1st of each month).
-2. **HTTP Request** — `POST http://<api-host>:8000/retrain`
-   - Body: `{ "trials": 80, "require_improvement": true }`
-   - Capture `job_id` from the response.
-3. **Wait** — 5 minutes (lets the first benchmark trials warm up; tune to your runtime).
-4. **HTTP Request (loop)** — `GET /retrain/{{$json.job_id}}` with retry-until,
-   condition: `{{$json.status}} !== "running"`. Use the *Polling* pattern
-   (built-in node setting) or a Loop Over Items node with a Wait + IF.
-5. **IF / Slack** — branch on `status` and `deployed`:
-   - `completed` & `deployed=true` → Slack: "✅ Model deployed. MAE = {{$json.train_report.mae}}"
-   - `completed` & `deployed=false` → Slack: "⚠️ Champion gate rejected new model. Current model retained."
-   - `failed` → Slack: "❌ Retrain failed. {{$json.error}}\n{{$json.stderr_tail}}"
+## Agendamento
 
-## n8n workflow for batch predict on new orders
+### `GET /schedule`
+Próxima execução automática. Lê `data/training/schedule.json` (recalcula a partir do
+cron guardado, por isso nunca fica obsoleto); se não existir, devolve o mensal default.
+```json
+{ "next_run_utc": "2026-06-01T03:00:00+00:00", "cron": "0 3 1 * *",
+  "cadence": "monthly", "source": "overnight retrain (n8n)", "timezone": "UTC" }
+```
 
-1. **Google Drive Trigger** — watch a folder, fire when a BOM/CAD/OP file arrives.
-2. **Function / Code** — derive the `op_producao` key from the filename.
-3. **HTTP Request** — `POST /predict { "key": "<key>" }`.
-4. **Google Sheets / Airtable** — append the predicted rows to a tracking sheet.
+### `POST /schedule`
+Regista o agendamento. Aceita **`cron`** (5 campos — calcula a próxima execução) e/ou
+**`next_run_utc`** (ISO 8601 explícito):
+```json
+{ "cron": "0 0 1 * *", "source": "n8n" }
+```
+`422` se não enviares nem `cron` (válido, 5 campos) nem `next_run_utc`.
 
-For this to work end-to-end you also need an ingest step that drops the file
-into `data/raw/` and runs `pipeline features`. Until that's wired, this
-workflow only works for orders already present in the training data.
+---
 
-## Security notes
-
-The API has no authentication. Before exposing it beyond a private network:
-
-- Put it behind a reverse proxy (Caddy, nginx) with TLS.
-- Add an API key dependency (`fastapi.Depends`) or a JWT layer.
-- Restrict `/retrain` to internal callers — it's resource-intensive.
-- n8n's HTTP node supports header auth out of the box.
+## Códigos de erro
+- `401` — `X-API-Key` em falta ou inválido (quando `API_KEY` está definido)
+- `409` — já há um retreino a correr
+- `415` — ficheiro não é `.pdf`
+- `422` — sem geometria / parâmetros inválidos
+- `503` — sem modelo deployado (corre `pipeline train`)

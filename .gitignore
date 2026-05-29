@@ -1,0 +1,22 @@
+# segredos
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# artefactos de treino regeneráveis
+catboost_info/
+
+# sistema
+.DS_Store
+
+# uploads runtime do frontend
+frontend/uploads/
+frontend/apikey.js
+api.log
+data/training/retrain_jobs.json
+data/training/schedule.json
+cloudflared.log
