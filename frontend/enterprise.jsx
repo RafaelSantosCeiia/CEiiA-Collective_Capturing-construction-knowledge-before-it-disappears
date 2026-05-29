@@ -31,6 +31,8 @@ const I = {
   Activity: (p) => <Svg {...p}><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.68 2.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4.45 12H2" /></Svg>,
   Plus: (p) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>,
   Minus: (p) => <Svg {...p}><path d="M5 12h14" /></Svg>,
+  Maximize: (p) => <Svg {...p}><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" /></Svg>,
+  Minimize: (p) => <Svg {...p}><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" /></Svg>,
   FileUp: (p) => <Svg {...p}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M12 12v6" /><path d="m9 15 3-3 3 3" /></Svg>,
   FileText: (p) => <Svg {...p}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8" /><path d="M16 13H8" /><path d="M16 17H8" /></Svg>,
   FileSearch: (p) => <Svg {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><circle cx="11.5" cy="14.5" r="2.5" /><path d="M13.27 16.27 15 18" /></Svg>,
@@ -809,21 +811,22 @@ function DLegend({ className = "" }) {
     </div>);
 }
 
-function DMetric({ icon, label, value, unit, sub, subTone, hint, alert, tip }) {
+function DMetric({ icon, label, value, unit, sub, subTone, hint, alert, tip, size }) {
   const Icon = icon;
+  const big = size === "large";
   const sc = subTone === "up" ? "var(--ok)" : subTone === "down" ? "var(--err)" : "var(--text-faint)";
   return (
-    <div className="rounded-lg px-4 py-3.5 border bg-[var(--surface)]"
+    <div className={"rounded-lg border bg-[var(--surface)] " + (big ? "px-5 py-5" : "px-4 py-3.5")}
       style={alert ? { borderColor: "var(--err)", background: "color-mix(in srgb, var(--err) 8%, var(--surface))" } : { borderColor: "var(--border)" }}>
-      <div className="text-[11.5px] flex items-center gap-1.5" style={{ color: alert ? "var(--err)" : "var(--text-muted)" }}>
-        <Icon size={13} />{label}
+      <div className={"flex items-center gap-1.5 " + (big ? "text-[13px]" : "text-[11.5px]")} style={{ color: alert ? "var(--err)" : "var(--text-muted)" }}>
+        <Icon size={big ? 16 : 13} />{label}
         {tip && <HelpTip label={label} text={tip} size={13} className="ml-auto" />}
       </div>
-      <div className="mt-1.5 text-[22px] font-semibold text-[var(--text)] tabular-nums">
-        {value}{unit && <span className="text-[14px] font-normal text-[var(--text-muted)] ml-0.5">{unit}</span>}
+      <div className={"font-semibold text-[var(--text)] tabular-nums " + (big ? "mt-2 text-[44px] lg:text-[56px] leading-none" : "mt-1.5 text-[22px]")}>
+        {value}{unit && <span className={"font-normal text-[var(--text-muted)] ml-0.5 " + (big ? "text-[22px]" : "text-[14px]")}>{unit}</span>}
       </div>
-      {sub && <div className="text-[11px] mt-0.5" style={{ color: alert ? "var(--err)" : sc }}>{sub}</div>}
-      {hint && <div className="text-[10.5px] mt-0.5 text-[var(--text-faint)]">{hint}</div>}
+      {sub && <div className={(big ? "text-[13px] mt-2" : "text-[11px] mt-0.5")} style={{ color: alert ? "var(--err)" : sc }}>{sub}</div>}
+      {hint && <div className={(big ? "text-[12px] mt-1" : "text-[10.5px] mt-0.5") + " text-[var(--text-faint)]"}>{hint}</div>}
     </div>);
 }
 
@@ -831,6 +834,7 @@ function DashboardPage() {
   const TOTAL_STEPS = 14, DONE_STEPS = 7, ACTIVE_STEP = 8;
   const [secs, setSecs] = useStateE(724);
   const [clock, setClock] = useStateE("");
+  const [wallMode, setWallMode] = useStateE(false);  // kiosk view: hero + key signals only
   useEffectE(() => {
     const id = setInterval(() => setSecs((s) => s + 1), 1000);
     return () => clearInterval(id);
@@ -856,19 +860,21 @@ function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* demo banner */}
-      <div className="rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-3 flex items-start gap-2.5">
-        <span className="text-[var(--accent-hover)] mt-0.5"><I.Info size={16} /></span>
-        <div className="text-[12.5px] text-[var(--text)] leading-relaxed">
-          <span className="font-semibold">Demo · simulated data.</span>{" "}
-          <span className="text-[var(--text-muted)]">Mockup of a shop-floor production panel. With real-time capture at the station (MES / sensors / per-panel label scan), these numbers feed live and the dashboard becomes functional — the model already predicts time per panel and per micro-operation.</span>
+      {/* demo banner — hidden in wall mode */}
+      {!wallMode && (
+        <div className="rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-3 flex items-start gap-2.5">
+          <span className="text-[var(--accent-hover)] mt-0.5"><I.Info size={16} /></span>
+          <div className="text-[12.5px] text-[var(--text)] leading-relaxed">
+            <span className="font-semibold">Demo · simulated data.</span>{" "}
+            <span className="text-[var(--text-muted)]">Mockup of a shop-floor production panel. With real-time capture at the station (MES / sensors / per-panel label scan), these numbers feed live and the dashboard becomes functional — the model already predicts time per panel and per micro-operation.</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* top bar */}
       <div className="flex items-center justify-between flex-wrap gap-3 pb-1 border-b border-[var(--border)]">
-        <div className="flex items-center gap-2.5 text-[15px] font-medium text-[var(--text)]">
-          <I.Gauge size={18} /> BluFab · Station 66 — Framing &amp; Boarding
+        <div className={"flex items-center gap-2.5 font-medium text-[var(--text)] " + (wallMode ? "text-[20px]" : "text-[15px]")}>
+          <I.Gauge size={wallMode ? 22 : 18} /> BluFab · Station 66 — Framing &amp; Boarding
           <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border border-[var(--warn)]/50 text-[var(--warn)] bg-[var(--warn)]/12">
             Demo
           </span>
@@ -879,24 +885,35 @@ function DashboardPage() {
           <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ok)]/15 text-[var(--ok)] text-[11px] font-medium px-2.5 py-1">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--ok)] animate-pulse" /> live
           </span>
-          <HelpTip label="Live indicator" text="Shows the dashboard is auto-updating. In this demo the values are simulated rather than read from the station." size={14} />
+          <button type="button" onClick={() => setWallMode((w) => !w)}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] border border-[var(--border)] hover:bg-[var(--surface-2)] transition-colors">
+            {wallMode ? <I.Minimize size={14} /> : <I.Maximize size={14} />}
+            {wallMode ? "Exit wall mode" : "Wall mode"}
+          </button>
+          <HelpTip label="Wall mode" text="A simplified kiosk view for a mounted floor display: shows only the running job, today's pace and any deviation, hiding the detailed tables — readable from across the room." size={14} />
         </div>
       </div>
 
       {/* color legend — defines the rule once for the whole dashboard */}
       <DLegend className="-mt-1" />
 
-      {/* metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <DMetric icon={I.CircleCheck} label="Panels completed" value="7" sub="of 11 planned today" hint="64% of today's plan"
+      {/* primary KPIs — the two that matter at a glance; enlarged in wall mode */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <DMetric icon={I.CircleCheck} label="Today's pace" value="7" unit="/ 11" sub="64% of today's plan" size={wallMode ? "large" : undefined}
           tip="How many panels have been finished today, out of the number planned for the shift." />
-        <DMetric icon={I.Clock} label="Avg actual time" value="18" unit="min" sub="↓ 2 min vs estimate" subTone="up" hint="average of panels completed today"
-          tip="Average real build time of the panels completed today. The arrow compares it to the estimate (down = faster than estimated)." />
-        <DMetric icon={I.Activity} label="Model accuracy" value="91" unit="%" sub="↑ 3% this week" subTone="up" hint="predictions within ±15% of actual"
-          tip="Share of recent predictions that landed within 15% of the actual measured time. Demo figure — the real, audited accuracy (error vs human floor, calibration) is on the Model Metrics page." />
-        <DMetric icon={I.CircleAlert} label="Deviations > 20%" value="1" sub="ECO_PP01K · 25.4m vs 19.8m est." alert
+        <DMetric icon={I.CircleAlert} label="Deviations > 20%" value="1" sub="ECO_PP01K · 25.4m vs 19.8m est." alert size={wallMode ? "large" : undefined}
           tip="Panels whose real build time differs from the estimate by more than 20% — flagged for a closer look." />
       </div>
+
+      {/* secondary KPIs — analytical, hidden in wall mode */}
+      {!wallMode && (
+        <div className="grid grid-cols-2 gap-3">
+          <DMetric icon={I.Clock} label="Avg actual time" value="18" unit="min" sub="↓ 2 min vs estimate" subTone="up" hint="average of panels completed today"
+            tip="Average real build time of the panels completed today. The arrow compares it to the estimate (down = faster than estimated)." />
+          <DMetric icon={I.Activity} label="Model accuracy" value="91" unit="%" sub="↑ 3% this week" subTone="up" hint="predictions within ±15% of actual"
+            tip="Share of recent predictions that landed within 15% of the actual measured time. Demo figure — the real, audited accuracy (error vs human floor, calibration) is on the Model Metrics page." />
+        </div>
+      )}
 
       {/* in production now */}
       <Card padded={false}>
@@ -906,8 +923,8 @@ function DashboardPage() {
         </div>
         <div className="px-5 py-4 flex flex-col md:flex-row items-start gap-5">
           <div className="flex-1 min-w-0 w-full">
-            <div className="text-[20px] font-semibold text-[var(--text)] font-mono">ECO_PG03K</div>
-            <div className="text-[12px] text-[var(--text-muted)] mt-0.5">ECOCIAF01 GENERAL PAIR 03K · IS01A · Batch #024</div>
+            <div className={"font-semibold text-[var(--text)] font-mono leading-none " + (wallMode ? "text-[48px] lg:text-[64px]" : "text-[20px]")}>ECO_PG03K</div>
+            <div className={"text-[var(--text-muted)] " + (wallMode ? "text-[15px] mt-2" : "text-[12px] mt-0.5")}>ECOCIAF01 GENERAL PAIR 03K · IS01A · Batch #024</div>
             {/* progress grouped by phase so segments align with labels */}
             <div className="flex gap-2 mt-3.5">
               {D_PHASES.map((ph, pi) => {
@@ -930,18 +947,20 @@ function DashboardPage() {
             <div className="text-[12px] text-[var(--text-muted)]">Step {ACTIVE_STEP} of {TOTAL_STEPS} · phase <span className="text-[var(--warn)]">boarding</span> · in progress</div>
           </div>
           <div className="hidden md:block w-px self-stretch bg-[var(--border)]" />
-          <div className="text-right md:min-w-[140px]">
-            <div className="text-[11px] text-[var(--text-muted)]">elapsed</div>
-            <div className="text-[28px] font-semibold font-mono mt-1 tabular-nums" style={{ color: overEst ? "var(--err)" : "var(--text)" }}>{elapsed}</div>
-            <div className="text-[11px] text-[var(--text-muted)] mt-1">estimate: 16 min</div>
-            <div className="text-[12px] font-medium mt-1.5 inline-flex items-center gap-1 justify-end" style={{ color: paceColor }}>
-              {overEst ? <I.CircleAlert size={13} /> : <I.CircleCheck size={13} />} {paceLabel}
+          <div className={"text-right " + (wallMode ? "md:min-w-[260px]" : "md:min-w-[140px]")}>
+            <div className={"text-[var(--text-muted)] " + (wallMode ? "text-[13px]" : "text-[11px]")}>elapsed</div>
+            <div className={"font-semibold font-mono tabular-nums leading-none " + (wallMode ? "text-[56px] lg:text-[72px] mt-2" : "text-[28px] mt-1")} style={{ color: overEst ? "var(--err)" : "var(--text)" }}>{elapsed}</div>
+            <div className={"text-[var(--text-muted)] " + (wallMode ? "text-[13px] mt-2" : "text-[11px] mt-1")}>estimate: 16 min</div>
+            <div className={"font-medium inline-flex items-center gap-1 justify-end " + (wallMode ? "text-[16px] mt-3 px-3 py-1.5 rounded-full" : "text-[12px] mt-1.5")}
+              style={wallMode ? { color: paceColor, background: "color-mix(in srgb, " + paceColor + " 14%, transparent)" } : { color: paceColor }}>
+              {overEst ? <I.CircleAlert size={wallMode ? 18 : 13} /> : <I.CircleCheck size={wallMode ? 18 : 13} />} {paceLabel}
             </div>
           </div>
         </div>
       </Card>
 
-      {/* two-col bottom */}
+      {/* two-col bottom — detailed tables, hidden in wall mode */}
+      {!wallMode && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {/* micro-processes */}
         <Card padded={false}>
@@ -1041,6 +1060,7 @@ function DashboardPage() {
           </Card>
         </div>
       </div>
+      )}
     </div>);
 }
 
