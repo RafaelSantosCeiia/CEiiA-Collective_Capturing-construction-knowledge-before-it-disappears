@@ -512,12 +512,20 @@ function StatusDot({ tone }) {
 /* ============================================================
  * SIDEBAR
  * ============================================================ */
+// Grouped by audience: Operations (floor + sales), Model (ML/ops owner), Vision (roadmap).
 const NAV = [
-{ id: "dashboard", label: "Live Dashboard", subtitle: "Shop-floor production view (demo · simulated data).", Icon: I.Gauge },
-{ id: "predict", label: "Predictor", subtitle: "Predict per-operation durations for an order.", Icon: I.Calculator },
-{ id: "metrics", label: "Model Metrics", subtitle: "How accuracy improves as data grows.", Icon: I.Activity },
-{ id: "retrain", label: "Training", subtitle: "Refit the deployed model on the latest data.", Icon: I.Cpu },
-{ id: "history", label: "History", subtitle: "Recent retrain jobs and outcomes.", Icon: I.History }];
+  { section: "Operations", items: [
+    { id: "dashboard", label: "Live Dashboard", subtitle: "Shop-floor production view (demo · simulated data).", Icon: I.Gauge },
+    { id: "predict", label: "Predictor", subtitle: "Predict per-operation durations for an order.", Icon: I.Calculator }] },
+  { section: "Model", items: [
+    { id: "metrics", label: "Model Metrics", subtitle: "How accuracy improves as data grows.", Icon: I.Activity },
+    { id: "retrain", label: "Training", subtitle: "Refit the deployed model on the latest data.", Icon: I.Cpu },
+    { id: "history", label: "History", subtitle: "Recent retrain jobs and outcomes.", Icon: I.History }] },
+  { section: "Vision", items: [
+    { id: "future", label: "Future Vision", subtitle: "What richer data unlocks (demo · fictitious).", Icon: I.Layers, badge: "demo" }] }];
+
+// Flat list of all tab ids (keep-alive, hash routing).
+const NAV_IDS = NAV.flatMap((s) => s.items.map((i) => i.id));
 
 
 /* ============================================================
@@ -963,24 +971,28 @@ function Sidebar({ active, onChange }) {
         </div>
       </div>
 
-      <nav className="px-3 py-4 space-y-1">
-        <div className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">Workspace</div>
-        {NAV.map((n) => {
-          const isActive = active === n.id;
-          return (
-            <button key={n.id} onClick={() => onChange(n.id)}
-            className={"w-full text-left flex items-center gap-3 px-3 h-10 rounded-md transition-colors duration-150 " + (
-            isActive ?
-            "bg-[var(--accent)]/12 text-[var(--text)]" :
-            "text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]")}>
-              <span className={isActive ? "text-[var(--accent-hover)]" : "text-[var(--text-faint)]"}>
-                <n.Icon size={17} />
-              </span>
-              <span className="text-[14px] font-medium flex-1">{n.label}</span>
-              {isActive && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-hover)]" />}
-            </button>);
-
-        })}
+      <nav className="px-3 py-4 space-y-4 overflow-y-auto">
+        {NAV.map((group) => (
+          <div key={group.section} className="space-y-1">
+            <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">{group.section}</div>
+            {group.items.map((n) => {
+              const isActive = active === n.id;
+              return (
+                <button key={n.id} onClick={() => onChange(n.id)}
+                className={"w-full text-left flex items-center gap-3 px-3 h-10 rounded-md transition-colors duration-150 " + (
+                isActive ?
+                "bg-[var(--accent)]/12 text-[var(--text)]" :
+                "text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]")}>
+                  <span className={isActive ? "text-[var(--accent-hover)]" : "text-[var(--text-faint)]"}>
+                    <n.Icon size={17} />
+                  </span>
+                  <span className="text-[14px] font-medium flex-1">{n.label}</span>
+                  {n.badge && <span className="text-[9.5px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-[var(--accent)]/40 text-[var(--accent-hover)] bg-[var(--accent)]/10">{n.badge}</span>}
+                  {isActive && !n.badge && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-hover)]" />}
+                </button>);
+            })}
+          </div>
+        ))}
       </nav>
 
       <div className="mt-auto px-5 py-4 border-t border-[var(--border)] text-[12px] text-[var(--text-faint)]">
@@ -993,7 +1005,7 @@ function Sidebar({ active, onChange }) {
 /* ============================================================
  * TOP BAR
  * ============================================================ */
-function TopBar({ server, setServer, health, modelName, onFuture }) {
+function TopBar({ server, setServer, health, modelName }) {
   const tone = health === "ok" ? "ok" : health === "checking" ? "slate" : "err";
   const label = health === "ok" ? "Connected" : health === "checking" ? "Checking…" : "Disconnected";
   const healthTip = health === "ok"
@@ -1017,14 +1029,6 @@ function TopBar({ server, setServer, health, modelName, onFuture }) {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        {onFuture && (
-          <button onClick={onFuture}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[13px] text-[var(--accent-hover)] hover:bg-[var(--accent)]/20 transition-colors">
-            <I.Activity size={15} />
-            <span>Future Vision</span>
-            <I.ChevDown size={14} className="-rotate-90" />
-          </button>
-        )}
         <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-[var(--border)] bg-[var(--surface)]">
           <StatusDot tone={tone} />
           <span className="text-[13px] text-[var(--text)]">{label}</span>
@@ -2650,7 +2654,7 @@ function FutureScenarioBlock({ icon, title, note, data, xLabel, xUnit = "" }) {
   );
 }
 
-function FutureGeneralResult({ general }) {
+function FutureGeneralResult({ general, level }) {
   return (
     <Card className="mb-4">
       <FutureSectionHead
@@ -2674,7 +2678,7 @@ function FutureGeneralResult({ general }) {
           <span className="font-medium"> random</span> (wide interval) — addressed through workflow discipline, not layout.
         </div>
       </div>
-      <FutureOpTable items={general.items} />
+      <FutureOpTable items={general.items} level={level} />
     </Card>
   );
 }
@@ -2694,7 +2698,8 @@ function FutureOpRow({ it }) {
   );
 }
 
-function FutureOpTable({ items }) {
+function FutureOpTable({ items, level }) {
+  const rangeLabel = level ? level.replace(/^q/, "") + "% range" : "Interval";
   const [open, setOpen] = useStateE(false);
   const productive = items.filter(it => it.micro_op_num <= 14);
   const waste = items.filter(it => it.micro_op_num >= 15);
@@ -2712,7 +2717,7 @@ function FutureOpTable({ items }) {
               <tr className="bg-[var(--surface-2)] text-[var(--text-muted)] text-[11.5px] uppercase tracking-wider">
                 <th className="px-4 py-2 text-left font-medium">Micro-operation</th>
                 <th className="px-4 py-2 text-right font-medium">Estimate</th>
-                <th className="px-4 py-2 text-right font-medium">Interval</th>
+                <th className="px-4 py-2 text-right font-medium">{rangeLabel}</th>
               </tr>
             </thead>
             <tbody>
@@ -2733,7 +2738,7 @@ function FutureOpTable({ items }) {
   );
 }
 
-function FuturePage({ server, onBack }) {
+function FuturePage({ server }) {
   const [code, setCode] = useStateE("");
   const [file, setFile] = useStateE(null);
   const [loading, setLoading] = useStateE(false);
@@ -2760,31 +2765,29 @@ function FuturePage({ server, onBack }) {
   }
 
   return (
-    <div className="h-screen overflow-auto bg-[var(--bg)]">
-      {/* standalone top bar (no sidebar) */}
-      <div className="h-[60px] border-b border-[var(--border)] flex items-center gap-3 px-6 sticky top-0 bg-[var(--bg)] z-20">
-        <button onClick={onBack}
-          className="flex items-center gap-1.5 h-9 px-3 rounded-md border border-[var(--border)] bg-[var(--surface)] text-[13px] text-[var(--text)] hover:border-[var(--accent)] transition-colors">
-          <I.ChevDown size={15} className="rotate-90" /> Back
-        </button>
+    <div className="max-w-[1100px]">
+      <div className="mb-4">
         <div className="flex items-center gap-2">
-          <I.Activity size={17} className="text-[var(--accent-hover)]" />
-          <span className="text-[14px] font-semibold text-[var(--text)]">Future Vision</span>
+          <h1 className="text-[20px] font-semibold text-[var(--text)]">What richer data unlocks</h1>
           <span className="text-[11px] px-2 py-0.5 rounded-full border border-[var(--accent)]/40 text-[var(--accent-hover)] bg-[var(--accent)]/10">demo · fictitious data</span>
         </div>
+        <p className="text-[13.5px] text-[var(--text-muted)] mt-1 max-w-[760px]">
+          A glimpse of the future of this project. With more and richer measurements we can surface actionable patterns the current
+          model can't see: hidden waste, and how <span className="text-[var(--text)]">temperature</span>,
+          <span className="text-[var(--text)]"> operator experience</span> and <span className="text-[var(--text)]">time of day</span>
+          shift productivity. The central estimate uses the general model; the panels below show how each variable would move the time.
+        </p>
       </div>
 
-      <div className="px-6 lg:px-8 py-6 max-w-[1100px] mx-auto">
-        <div className="mb-5">
-          <h1 className="text-[20px] font-semibold text-[var(--text)]">What richer data unlocks</h1>
-          <p className="text-[13.5px] text-[var(--text-muted)] mt-1 max-w-[760px]">
-            A glimpse of the future of this project, built on <span className="text-[var(--text)] font-medium">fictitious data</span>.
-            With more and richer measurements we can surface actionable patterns the current model can't see: hidden waste, and how
-            <span className="text-[var(--text)]"> temperature</span>, <span className="text-[var(--text)]">operator experience</span> and
-            <span className="text-[var(--text)]"> time of day</span> shift productivity. The central estimate uses the general model;
-            the panels below show how each variable would move the time.
-          </p>
+      {/* prominent illustrative-not-measured banner */}
+      <div className="mb-5 flex items-start gap-2.5 px-4 py-3 rounded-lg border border-[var(--warn)]/40 bg-[var(--warn)]/10 text-[13px] text-[var(--text)]">
+        <I.CircleAlert size={16} className="text-[var(--warn)] mt-0.5 shrink-0" />
+        <div>
+          <span className="font-semibold text-[var(--warn)]">Illustrative preview — not measured.</span> These numbers come from
+          <span className="font-medium"> fictitious data</span> generated from real panel geometry, to show the patterns richer
+          measurements would unlock. They are not real results for any specific panel.
         </div>
+      </div>
 
         <Card className="mb-5">
           <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
@@ -2831,7 +2834,7 @@ function FuturePage({ server, onBack }) {
               Panel <span className="font-mono text-[var(--text)]">{result.panel_id}</span>
               {result.n_panels > 1 && <span> · {result.n_panels} sub-panels aggregated</span>}
             </div>
-            <FutureGeneralResult general={result.general} />
+            <FutureGeneralResult general={result.general} level={result.interval_level} />
             <FutureScenarioBlock icon={<I.Activity size={18} />} title="Temperature — ambient comfort"
               note={result.temperature.note} data={result.temperature} xLabel="Temperature (°C)" xUnit="°" />
             <FutureScenarioBlock icon={<I.BadgeCheck size={18} />} title="Operator experience"
@@ -2841,7 +2844,6 @@ function FuturePage({ server, onBack }) {
           </div>
         )}
       </div>
-    </div>
   );
 }
 
@@ -2850,21 +2852,31 @@ function FuturePage({ server, onBack }) {
  * ============================================================ */
 function EnterpriseApp() {
   const [server, setServer] = useStateE(E_DEFAULT_SERVER);
-  const [tab, setTab] = useStateE("dashboard");
+  const [tab, setTab] = useStateE(() => {
+    const h = (window.location.hash || "").replace(/^#/, "");
+    return NAV_IDS.includes(h) ? h : "dashboard";
+  });
   const [health, setHealth] = useStateE("checking");
   const [modelName, setModelName] = useStateE("");
   const [reloadKey, setReloadKey] = useStateE(0);
-  const [showFuture, setShowFuture] = useStateE(false);
   // keep-alive: a tab mounts on first visit and stays mounted (hidden via CSS),
-  // so predictions, training jobs, etc. survive switching tabs. FuturePage too.
+  // so predictions, training jobs and the Future Vision report survive tab switches.
   const [visited, setVisited] = useStateE({ dashboard: true });
-  const [futureMounted, setFutureMounted] = useStateE(false);
 
+  // tab ↔ URL hash (deep links + browser back/forward)
   useEffectE(() => {
     setVisited((v) => (v[tab] ? v : { ...v, [tab]: true }));
+    if ((window.location.hash || "").replace(/^#/, "") !== tab) window.location.hash = tab;
   }, [tab]);
 
-  function openFuture() { setFutureMounted(true); setShowFuture(true); }
+  useEffectE(() => {
+    const onHash = () => {
+      const h = (window.location.hash || "").replace(/^#/, "");
+      if (NAV_IDS.includes(h)) setTab(h);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   useEffectE(() => {
     let cancelled = false;
@@ -2889,25 +2901,19 @@ function EnterpriseApp() {
   }, [server, reloadKey]);
 
   return (
-    <div className="h-screen overflow-hidden">
-      <div className={"h-full flex " + (showFuture ? "hidden" : "")}>
-        <Sidebar active={tab} onChange={setTab} />
-        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-          <TopBar server={server} setServer={setServer} health={health} modelName={modelName} onFuture={openFuture} />
-          <main className="flex-1 min-h-0 px-6 lg:px-8 py-5 max-w-[1280px] w-full overflow-auto">
-            {visited.dashboard && <div className={tab === "dashboard" ? "h-full" : "hidden"}><DashboardPage /></div>}
-            {visited.predict && <div className={tab === "predict" ? "h-full" : "hidden"}><PredictTab server={server} /></div>}
-            {visited.metrics && <div className={tab === "metrics" ? "h-full" : "hidden"}><MetricsPage server={server} /></div>}
-            {visited.retrain && <div className={tab === "retrain" ? "h-full" : "hidden"}><RetrainTab server={server} onJobFinished={() => setReloadKey((k) => k + 1)} /></div>}
-            {visited.history && <div className={tab === "history" ? "h-full" : "hidden"}><HistoryTab server={server} reloadKey={reloadKey} /></div>}
-          </main>
-        </div>
+    <div className="h-screen overflow-hidden flex">
+      <Sidebar active={tab} onChange={setTab} />
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+        <TopBar server={server} setServer={setServer} health={health} modelName={modelName} />
+        <main className="flex-1 min-h-0 px-6 lg:px-8 py-5 max-w-[1280px] w-full overflow-auto">
+          {visited.dashboard && <div className={tab === "dashboard" ? "h-full" : "hidden"}><DashboardPage /></div>}
+          {visited.predict && <div className={tab === "predict" ? "h-full" : "hidden"}><PredictTab server={server} /></div>}
+          {visited.metrics && <div className={tab === "metrics" ? "h-full" : "hidden"}><MetricsPage server={server} /></div>}
+          {visited.retrain && <div className={tab === "retrain" ? "h-full" : "hidden"}><RetrainTab server={server} onJobFinished={() => setReloadKey((k) => k + 1)} /></div>}
+          {visited.history && <div className={tab === "history" ? "h-full" : "hidden"}><HistoryTab server={server} reloadKey={reloadKey} /></div>}
+          {visited.future && <div className={tab === "future" ? "h-full" : "hidden"}><FuturePage server={server} /></div>}
+        </main>
       </div>
-      {futureMounted && (
-        <div className={showFuture ? "" : "hidden"}>
-          <FuturePage server={server} onBack={() => setShowFuture(false)} />
-        </div>
-      )}
     </div>);
 
 }
