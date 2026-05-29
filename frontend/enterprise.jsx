@@ -2609,7 +2609,7 @@ function FutureBreakdownBar({ breakdown }) {
   );
 }
 
-function FutureScenarioCards({ scenarios, unit }) {
+function FutureScenarioCards({ scenarios }) {
   const totals = scenarios.map(s => s.total_sec);
   const best = Math.min(...totals), worst = Math.max(...totals);
   return (
@@ -2642,7 +2642,7 @@ function FutureScenarioBlock({ icon, title, note, data, xLabel, xUnit = "" }) {
   return (
     <Card className="mb-4">
       <FutureSectionHead icon={icon} title={title} note={note} />
-      <FutureScenarioCards scenarios={data.scenarios} unit={data.unit} />
+      <FutureScenarioCards scenarios={data.scenarios} />
       <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--bg)]/40 px-2 pt-3">
         <MetricChart series={series} yUnit="s" xLabel={xLabel} xTicks={xTicks} xUnit={xUnit} yNice />
       </div>

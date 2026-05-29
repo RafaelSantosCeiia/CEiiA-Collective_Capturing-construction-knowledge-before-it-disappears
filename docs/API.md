@@ -44,6 +44,9 @@ adiciona o header `X-API-Key` em cada nó HTTP Request (ou uma credencial Header
 | GET | `/retrain/log` | histórico dos retreinos |
 | GET | `/schedule` | próximo retreino automático |
 | POST | `/schedule` | regista o agendamento (aceita `cron`) |
+| GET | `/future/models` | **[demo]** metadados dos 4 modelos da *Visão de Futuro* |
+| POST | `/future/predict` | **[demo]** previsão *futuro* por código de painel (`{key}`) |
+| POST | `/future/predict/pdf` | **[demo]** previsão *futuro* por upload de PDF |
 
 ---
 
@@ -179,6 +182,45 @@ Regista o agendamento. Aceita **`cron`** (5 campos — calcula a próxima execu�
 { "cron": "0 0 1 * *", "source": "n8n" }
 ```
 `422` se não enviares nem `cron` (válido, 5 campos) nem `next_run_utc`.
+
+---
+
+## Visão de Futuro (demo — dados FICTÍCIOS)
+
+Subsistema paralelo que ilustra padrões que dados mais ricos desbloqueariam (ver §6
+do README). **Não** usa o modelo real; serve os 4 modelos sintéticos de
+`data/training/future/` (gerados por `pipeline future-build`).
+
+### `GET /future/models`
+Metadados dos 4 modelos: `[{name, champion, lopo_mae, noise_floor_mae, extra_cols, n_train_obs}]`.
+
+### `POST /future/predict`
+Previsão por código de painel em cache. Body: `{ "key": "PG02K", "level": "q80" }`.
+Devolve a previsão central (`general`, com breakdown produtivo/desperdício) e os
+cenários (`temperature`, `experience`, `timeofday`), cada um com `scenarios`
+(cartões de destaque) e `curve` (grelha fina para o gráfico):
+```json
+{
+  "panel_id": "PG02K", "interval_level": "q80", "n_panels": 1,
+  "general": {
+    "items": [{"micro_op_num": 1, "micro_op_name": "Pegar nos perfis",
+               "point_sec": 14.0, "lo_sec": 10.1, "hi_sec": 17.9}, "..."],
+    "total_sec": 599.8,
+    "breakdown": {"productive_pct": 75.6, "idle_no_value_pct": 13.0, "material_necessary_pct": 11.4, "...": "..."}
+  },
+  "temperature": {
+    "feature": "temperatura_c", "unit": "°C", "note": "...",
+    "scenarios": [{"value": 10, "label": "10°C — cold", "total_sec": 649.2}, "..."],
+    "curve": [{"value": 8, "total_sec": 727.0}, "..."]
+  },
+  "experience": { "...": "..." }, "timeofday": { "...": "..." }
+}
+```
+
+### `POST /future/predict/pdf`
+`multipart/form-data` com `file` (PDF de processo). Query: `level` (`q80`|`q90`).
+A geometria vem da cache; em PDFs multi-painel agrega os sub-painéis (`n_panels`,
+`panel_ids`, `panels_without_geometry`). Mesma forma de resposta do endpoint acima.
 
 ---
 
