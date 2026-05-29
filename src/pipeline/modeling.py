@@ -317,6 +317,14 @@ def run(trials: int = 30, clean: bool = True, require_improvement: bool = True,
     }
     (output_dir / "leaderboard.json").write_text(json.dumps(report, indent=2, default=str))
     print(f"\n✅ deploy → {output_dir}/champion.joblib  ·  leaderboard → {output_dir}/leaderboard.json")
+
+    # métricas longitudinais (curva de aprendizagem, histórico, projeção)
+    try:
+        from .metrics import write_metrics
+        write_metrics(d, output_dir.parent / "metrics.json")
+    except Exception as e:
+        print(f"métricas falharam: {type(e).__name__}: {e}")
+
     _print_scorecard(report, lb)
     return report
 

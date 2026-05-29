@@ -15,3 +15,8 @@ catboost_info/
 
 # uploads runtime do frontend
 frontend/uploads/
+frontend/apikey.js
+api.log
+data/training/retrain_jobs.json
+data/training/schedule.json
+cloudflared.log

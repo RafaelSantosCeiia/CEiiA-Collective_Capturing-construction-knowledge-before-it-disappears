@@ -41,7 +41,13 @@ const I = {
   RotateCcw: (p) => <Svg {...p}><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></Svg>,
   Merge: (p) => <Svg {...p}><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 21V9a9 9 0 0 0 9 9" /></Svg>,
   HelpCircle: (p) => <Svg {...p}><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></Svg>,
-  Info: (p) => <Svg {...p}><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></Svg>
+  Info: (p) => <Svg {...p}><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></Svg>,
+  Gauge: (p) => <Svg {...p}><path d="m12 14 4-4" /><path d="M3.34 19a10 10 0 1 1 17.32 0" /></Svg>,
+  Play: (p) => <Svg {...p}><polygon points="6 3 20 12 6 21 6 3" /></Svg>,
+  User: (p) => <Svg {...p}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Svg>,
+  BarChart: (p) => <Svg {...p}><line x1="12" x2="12" y1="20" y2="10" /><line x1="18" x2="18" y1="20" y2="4" /><line x1="6" x2="6" y1="20" y2="16" /></Svg>,
+  TrendingDown: (p) => <Svg {...p}><polyline points="22 17 13.5 8.5 8.5 13.5 2 7" /><polyline points="16 17 22 17 22 11" /></Svg>,
+  List: (p) => <Svg {...p}><line x1="8" x2="21" y1="6" y2="6" /><line x1="8" x2="21" y1="12" y2="12" /><line x1="8" x2="21" y1="18" y2="18" /><line x1="3" x2="3.01" y1="6" y2="6" /><line x1="3" x2="3.01" y1="12" y2="12" /><line x1="3" x2="3.01" y1="18" y2="18" /></Svg>
 };
 
 /* ============================================================
@@ -86,10 +92,19 @@ function eTimeAgo(ts) {
   return `${Math.floor(d / 365)}y ago`;
 }
 
+function eGetApiKey() {
+  try { return (localStorage.getItem("blufab_api_key") || "").trim(); } catch { return ""; }
+}
+function eSetApiKey(v) {
+  try { v ? localStorage.setItem("blufab_api_key", v.trim()) : localStorage.removeItem("blufab_api_key"); } catch {}
+}
+
 async function eApi(base, path, opts = {}) {
   const url = base.replace(/\/+$/, "") + path;
+  const key = eGetApiKey();
   const headers = {
     "ngrok-skip-browser-warning": "true",
+    ...(key ? { "X-API-Key": key } : {}),
     ...(opts.body ? { "Content-Type": "application/json" } : {}),
     ...(opts.headers || {})
   };
@@ -120,9 +135,10 @@ function eErrorMessage(e, ctx) {
 
 async function eApiMultipart(base, path, formData) {
   const url = base.replace(/\/+$/, "") + path;
+  const key = eGetApiKey();
   const res = await fetch(url, {
     method: "POST",
-    headers: { "ngrok-skip-browser-warning": "true" },
+    headers: { "ngrok-skip-browser-warning": "true", ...(key ? { "X-API-Key": key } : {}) },
     body: formData
   });
   const text = await res.text();
@@ -173,6 +189,51 @@ function eExtractOpFromFilename(name) {
 
 function eNormalizeKey(k) {
   return String(k || "").trim().toUpperCase();
+}
+
+function eDownloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  a.remove(); URL.revokeObjectURL(url);
+}
+
+function eExportCsv(items) {
+  eDownloadFile(eBuildBatchCsv(items), "blufab-estimate.csv", "text/csv;charset=utf-8;");
+}
+
+function eExportPdf(items) {
+  const JsPDF = window.jspdf && window.jspdf.jsPDF;
+  if (!JsPDF) { alert("PDF library not loaded — check your connection and retry."); return; }
+  const doc = new JsPDF({ unit: "pt", format: "a4" });
+  const M = 40; let y = M;
+  doc.setFontSize(15); doc.setTextColor(20, 20, 20);
+  doc.text("BluFab — Production time estimate", M, y); y += 16;
+  doc.setFontSize(9); doc.setTextColor(130, 130, 130);
+  doc.text(new Date().toLocaleString(), M, y); y += 14;
+  const success = items.filter(it => it.state === "success" && it.result);
+  for (const it of success) {
+    const label = (it.result.key || it.label || "order");
+    const total = eFormatSeconds(eItemTotalSec(it));
+    if (y > 740) { doc.addPage(); y = M; }
+    doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+    doc.text(`${label}   —   ${total}`, M, y);
+    const preds = (it.result.predictions || []).slice().sort((a, b) => (a.op_order || 0) - (b.op_order || 0));
+    const body = preds.map(p => [String(p.op_order ?? ""), String(p.op_id ?? ""), eFormatSeconds(p.predicted_duration_sec)]);
+    doc.autoTable({
+      startY: y + 8,
+      head: [["#", "Operation", "Duration"]],
+      body,
+      styles: { fontSize: 9, cellPadding: 4 },
+      headStyles: { fillColor: [37, 99, 235], textColor: 255 },
+      columnStyles: { 0: { cellWidth: 36 }, 2: { halign: "right", cellWidth: 90 } },
+      margin: { left: M, right: M },
+      theme: "grid",
+    });
+    y = doc.lastAutoTable.finalY + 20;
+  }
+  doc.save("blufab-estimate.pdf");
 }
 
 function eBuildBatchCsv(items) {
@@ -452,9 +513,430 @@ function StatusDot({ tone }) {
  * SIDEBAR
  * ============================================================ */
 const NAV = [
+{ id: "dashboard", label: "Live Dashboard", subtitle: "Shop-floor production view (demo · simulated data).", Icon: I.Gauge },
 { id: "predict", label: "Predictor", subtitle: "Predict per-operation durations for an order.", Icon: I.Calculator },
+{ id: "metrics", label: "Model Metrics", subtitle: "How accuracy improves as data grows.", Icon: I.Activity },
 { id: "retrain", label: "Training", subtitle: "Refit the deployed model on the latest data.", Icon: I.Cpu },
 { id: "history", label: "History", subtitle: "Recent retrain jobs and outcomes.", Icon: I.History }];
+
+
+/* ============================================================
+ * MODEL METRICS (longitudinal)
+ * ============================================================ */
+function MetricChart({ series, refLines = [], yMin, yMax, yUnit = "", xLabel }) {
+  const W = 620, H = 250, P = { l: 46, r: 14, t: 14, b: 34 };
+  const xs = series.flatMap(s => s.pts.map(p => p.x));
+  const ys = series.flatMap(s => s.pts.map(p => p.y)).concat(refLines.map(r => r.y));
+  if (!xs.length) return null;
+  const xmin = Math.min(...xs), xmax = Math.max(...xs);
+  const ymin = yMin != null ? yMin : Math.min(...ys) * 0.92;
+  const ymax = yMax != null ? yMax : Math.max(...ys) * 1.06;
+  const sx = x => P.l + (xmax === xmin ? 0.5 : (x - xmin) / (xmax - xmin)) * (W - P.l - P.r);
+  const sy = y => H - P.b - (ymax === ymin ? 0.5 : (y - ymin) / (ymax - ymin)) * (H - P.t - P.b);
+  const yticks = [ymin, (ymin + ymax) / 2, ymax];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 260 }}>
+      {yticks.map((t, i) => (
+        <g key={i}>
+          <line x1={P.l} x2={W - P.r} y1={sy(t)} y2={sy(t)} stroke="var(--border-soft)" strokeWidth="1" />
+          <text x={P.l - 6} y={sy(t) + 3} textAnchor="end" fontSize="10" fill="var(--text-faint)">{Math.round(t)}{yUnit}</text>
+        </g>
+      ))}
+      {refLines.map((r, i) => (
+        <g key={"r" + i}>
+          <line x1={P.l} x2={W - P.r} y1={sy(r.y)} y2={sy(r.y)} stroke={r.color} strokeWidth="1.5" strokeDasharray="5 4" opacity="0.85" />
+          <text x={W - P.r} y={sy(r.y) - 4} textAnchor="end" fontSize="10" fill={r.color}>{r.label}</text>
+        </g>
+      ))}
+      {series.map((s, si) => {
+        const d = s.pts.map((p, i) => (i ? "L" : "M") + sx(p.x) + " " + sy(p.y)).join(" ");
+        return (
+          <g key={si}>
+            <path d={d} fill="none" stroke={s.color} strokeWidth="2"
+              strokeDasharray={s.dashed ? "6 4" : "0"} opacity={s.dashed ? 0.7 : 1} />
+            {!s.dashed && s.pts.map((p, i) => <circle key={i} cx={sx(p.x)} cy={sy(p.y)} r="3" fill={s.color} />)}
+          </g>
+        );
+      })}
+      {xLabel && <text x={(P.l + W - P.r) / 2} y={H - 6} textAnchor="middle" fontSize="10.5" fill="var(--text-muted)">{xLabel}</text>}
+    </svg>
+  );
+}
+
+function MetricStat({ label, value, sub, tone }) {
+  const col = tone === "ok" ? "var(--ok)" : tone === "warn" ? "var(--warn)" : "var(--text)";
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+      <div className="text-[11px] uppercase tracking-wider text-[var(--text-muted)] font-medium">{label}</div>
+      <div className="mt-1 text-[20px] font-semibold tabular-nums" style={{ color: col }}>{value}</div>
+      {sub && <div className="text-[11.5px] text-[var(--text-faint)] mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+function MetricsPage({ server }) {
+  const [data, setData] = useStateE(null);
+  const [err, setErr] = useStateE(null);
+  useEffectE(() => {
+    let cancelled = false;
+    (async () => {
+      try { const d = await eApi(server, "/metrics"); if (!cancelled) { setData(d); setErr(null); } }
+      catch (e) { if (!cancelled) setErr(e); }
+    })();
+  }, [server]);
+
+  if (err) return <div className="text-[13px] text-[var(--text-muted)]">Sem métricas. Corre <span className="font-mono">pipeline train</span> primeiro.</div>;
+  if (!data) return <div className="text-[13px] text-[var(--text-muted)]">A carregar métricas…</div>;
+
+  const hist = data.history || [];
+  const last = hist[hist.length - 1] || {};
+  const floor = data.noise_floor;
+  const accReal = { pts: hist.map(h => ({ x: h.n_panels, y: h.mae })), color: "var(--accent)" };
+  const accProj = { pts: (data.projection || []).map(p => ({ x: p.n_panels, y: p.mae })), color: "var(--accent)", dashed: true };
+  const covQ80 = { pts: hist.map(h => ({ x: h.n_panels, y: h.coverage_q80 })), color: "var(--ok)" };
+  const covQ90 = { pts: hist.map(h => ({ x: h.n_panels, y: h.coverage_q90 })), color: "var(--accent-hover)" };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title="Model Metrics" subtitle="How the model improves as production data accumulates — and how honest its confidence stays." />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <MetricStat label="Current error (MAE)" value={`${last.mae}s`} sub={`vs human limit ${floor}s`} />
+        <MetricStat label="Human noise floor" value={`${floor}s`} sub={`CV ${data.noise_floor_cv_pct}%`} tone="ok" />
+        <MetricStat label="Calibration 80%" value={`${last.coverage_q80}%`} sub="target 80%" tone={Math.abs(last.coverage_q80 - 80) <= 8 ? "ok" : "warn"} />
+        <MetricStat label="Training data" value={`${last.n_obs}`} sub={`${last.n_panels} panels`} />
+      </div>
+
+      <Card padded={false}>
+        <div className="px-5 pt-4">
+          <div className="text-[14px] font-semibold text-[var(--text)]">Accuracy vs data volume</div>
+          <div className="text-[12px] text-[var(--text-muted)] mt-0.5">Each panel of data lowers the error toward the human limit. Dashed = projection.</div>
+        </div>
+        <div className="px-3 pb-4 pt-2">
+          <MetricChart series={[accProj, accReal]} xLabel="training panels"
+            refLines={[{ y: floor, color: "var(--ok)", label: "human limit" }]} yUnit="s" />
+        </div>
+      </Card>
+
+      <Card padded={false}>
+        <div className="px-5 pt-4">
+          <div className="text-[14px] font-semibold text-[var(--text)]">Calibration over time</div>
+          <div className="text-[12px] text-[var(--text-muted)] mt-0.5">Confidence intervals stay honest as data grows (lines should hug the targets).</div>
+        </div>
+        <div className="px-3 pb-4 pt-2">
+          <MetricChart series={[covQ80, covQ90]} xLabel="training panels" yMin={50} yMax={100} yUnit="%"
+            refLines={[{ y: 80, color: "var(--ok)", label: "80% target" }, { y: 90, color: "var(--accent-hover)", label: "90% target" }]} />
+          <div className="px-2 mt-2 flex items-center gap-4 text-[11.5px] text-[var(--text-muted)]">
+            <span className="inline-flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block" style={{ background: "var(--ok)" }} />80% interval</span>
+            <span className="inline-flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block" style={{ background: "var(--accent-hover)" }} />90% interval</span>
+          </div>
+        </div>
+      </Card>
+
+      <div className="text-[11.5px] text-[var(--text-faint)] leading-relaxed">
+        Historical points are backfilled by training on increasing data volumes (an honest proxy for monthly retrains);
+        the last point is the live model. The projection extrapolates the trend toward the human noise floor and is an
+        estimate, not a measurement.
+      </div>
+    </div>
+  );
+}
+
+
+/* ============================================================
+ * LIVE DASHBOARD (demo · simulated data)
+ * ============================================================ */
+/* actual (min) vs expected per micro-operation */
+const D_MICRO = [
+  { n: 1, name: "Pick profiles", real: 0.8, exp: 0.8 },
+  { n: 2, name: "Place profiles", real: 1.2, exp: 1.1 },
+  { n: 3, name: "Fix frame", real: 0.6, exp: 0.7 },
+  { n: 4, name: "Measure / align", real: 2.1, exp: 1.6 },
+  { n: 5, name: "Crimp frame", real: 1.4, exp: 1.4 },
+  { n: 6, name: "Place 1st board", real: 1.7, exp: 1.6 },
+  { n: 7, name: "Measure on board", real: 2.6, exp: 1.9 },
+  { n: 8, name: "Screw board", real: null, exp: 1.0, state: "active" },
+  { n: 9, name: "Remove fasteners", real: null, exp: null, state: "todo" },
+  { n: 10, name: "Flip frame", real: null, exp: null, state: "todo" }];
+
+/* ordered by production sequence: completed first (in finish order), in-progress last */
+const D_COMPARE = [
+  { ref: "PG01K", real: 16.2, est: 18.0, done: "08:28" },
+  { ref: "PG02K", real: 15.8, est: 17.5, done: "08:49" },
+  { ref: "PCT01K", real: 14.0, est: 15.2, done: "11:05" },
+  { ref: "PP01K", real: 25.4, est: 19.8, done: "11:42" },
+  { ref: "PL01K", real: 17.3, est: 18.5, done: "13:30" },
+  { ref: "PG03K", real: 12.1, est: 16.0, running: true }];
+
+const D_QUEUE = [
+  { ref: "ECO_PG01K", start: "08:12", dur: "16m", status: "done" },
+  { ref: "ECO_PG02K", start: "08:31", dur: "18m", status: "done" },
+  { ref: "ECO_PG03K", start: "14:20", dur: "—", status: "active" },
+  { ref: "ECO_PP01K", start: "—", dur: "~20m", status: "queue" },
+  { ref: "ECO_PL01K", start: "—", dur: "~17m", status: "queue" }];
+
+/* phases group the 14 steps — so the progress bar aligns with the labels */
+const D_PHASES = [
+  { name: "pick profiles", steps: 3 },
+  { name: "crimping", steps: 3 },
+  { name: "boarding", steps: 5 },
+  { name: "labeling", steps: 3 }];
+
+const D_TONE = { ok: "var(--ok)", warn: "var(--warn)", err: "var(--err)", active: "var(--accent-hover)", todo: "var(--border)" };
+
+/* single color rule: <=10% within · 10-20% near limit · >20% deviation */
+function dDeltaPct(real, exp) {
+  if (real == null || exp == null || !exp) return null;
+  return Math.round((real - exp) / exp * 100);
+}
+function dDevTone(real, exp) {
+  const d = dDeltaPct(real, exp);
+  if (d == null) return "ok";
+  const a = Math.abs(d);
+  if (a > 20) return "err";
+  if (a > 10) return "warn";
+  return "ok";
+}
+function dFmtDelta(d) {
+  if (d == null) return "";
+  return (d > 0 ? "+" : "") + d + "%";
+}
+
+function DLegend({ className = "" }) {
+  const items = [
+    { c: "var(--ok)", t: "within estimate (±10%)" },
+    { c: "var(--warn)", t: "near limit (10–20%)" },
+    { c: "var(--err)", t: "deviation > 20%" }];
+  return (
+    <div className={"flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-[var(--text-muted)] " + className}>
+      {items.map((it) => (
+        <span key={it.t} className="inline-flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: it.c }} />{it.t}
+        </span>
+      ))}
+    </div>);
+}
+
+function DMetric({ icon, label, value, unit, sub, subTone, hint, alert }) {
+  const Icon = icon;
+  const sc = subTone === "up" ? "var(--ok)" : subTone === "down" ? "var(--err)" : "var(--text-faint)";
+  return (
+    <div className="rounded-lg px-4 py-3.5 border bg-[var(--surface)]"
+      style={alert ? { borderColor: "var(--err)", background: "color-mix(in srgb, var(--err) 8%, var(--surface))" } : { borderColor: "var(--border)" }}>
+      <div className="text-[11.5px] flex items-center gap-1.5" style={{ color: alert ? "var(--err)" : "var(--text-muted)" }}>
+        <Icon size={13} />{label}
+      </div>
+      <div className="mt-1.5 text-[22px] font-semibold text-[var(--text)] tabular-nums">
+        {value}{unit && <span className="text-[14px] font-normal text-[var(--text-muted)] ml-0.5">{unit}</span>}
+      </div>
+      {sub && <div className="text-[11px] mt-0.5" style={{ color: alert ? "var(--err)" : sc }}>{sub}</div>}
+      {hint && <div className="text-[10.5px] mt-0.5 text-[var(--text-faint)]">{hint}</div>}
+    </div>);
+}
+
+function DashboardPage() {
+  const TOTAL_STEPS = 14, DONE_STEPS = 7, ACTIVE_STEP = 8;
+  const [secs, setSecs] = useStateE(724);
+  const [clock, setClock] = useStateE("");
+  useEffectE(() => {
+    const id = setInterval(() => setSecs((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  useEffectE(() => {
+    function tick() {
+      const d = new Date();
+      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      setClock(`${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()} · ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+    }
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, []);
+  const elapsed = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+  const EST_SEC = 16 * 60;
+  const overEst = secs > EST_SEC;
+  const remainMin = Math.ceil(Math.abs(EST_SEC - secs) / 60);
+  const paceLabel = overEst ? `behind · +${remainMin} min` : `on time · ${remainMin} min left`;
+  const paceColor = overEst ? "var(--err)" : "var(--ok)";
+  const maxCmp = Math.max(...D_COMPARE.flatMap((c) => [c.real, c.est])) * 1.05;
+  const maxMicro = Math.max(...D_MICRO.map((m) => m.real || 0).concat(D_MICRO.map((m) => m.exp || 0)));
+
+  return (
+    <div className="space-y-5">
+      {/* demo banner */}
+      <div className="rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-3 flex items-start gap-2.5">
+        <span className="text-[var(--accent-hover)] mt-0.5"><I.Info size={16} /></span>
+        <div className="text-[12.5px] text-[var(--text)] leading-relaxed">
+          <span className="font-semibold">Demo · simulated data.</span>{" "}
+          <span className="text-[var(--text-muted)]">Mockup of a shop-floor production panel. With real-time capture at the station (MES / sensors / per-panel label scan), these numbers feed live and the dashboard becomes functional — the model already predicts time per panel and per micro-operation.</span>
+        </div>
+      </div>
+
+      {/* top bar */}
+      <div className="flex items-center justify-between flex-wrap gap-3 pb-1 border-b border-[var(--border)]">
+        <div className="flex items-center gap-2.5 text-[15px] font-medium text-[var(--text)]">
+          <I.Gauge size={18} /> BluFab · Station 66 — Framing &amp; Boarding
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-[12px] text-[var(--text-muted)]">{clock}</span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ok)]/15 text-[var(--ok)] text-[11px] font-medium px-2.5 py-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--ok)] animate-pulse" /> live
+          </span>
+        </div>
+      </div>
+
+      {/* color legend — defines the rule once for the whole dashboard */}
+      <DLegend className="-mt-1" />
+
+      {/* metrics */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <DMetric icon={I.CircleCheck} label="Panels completed" value="7" sub="of 11 planned today" hint="64% of today's plan" />
+        <DMetric icon={I.Clock} label="Avg actual time" value="18" unit="min" sub="↓ 2 min vs estimate" subTone="up" hint="average of panels completed today" />
+        <DMetric icon={I.Activity} label="Model accuracy" value="91" unit="%" sub="↑ 3% this week" subTone="up" hint="predictions within ±15% of actual" />
+        <DMetric icon={I.CircleAlert} label="Deviations > 20%" value="1" sub="ECO_PP01K · 25.4m vs 19.8m est." alert />
+      </div>
+
+      {/* in production now */}
+      <Card padded={false}>
+        <div className="px-5 pt-4 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+          <I.Play size={13} /> In production now
+        </div>
+        <div className="px-5 py-4 flex flex-col md:flex-row items-start gap-5">
+          <div className="flex-1 min-w-0 w-full">
+            <div className="text-[20px] font-semibold text-[var(--text)] font-mono">ECO_PG03K</div>
+            <div className="text-[12px] text-[var(--text-muted)] mt-0.5">ECOCIAF01 GENERAL PAIR 03K · IS01A · Batch #024</div>
+            {/* progress grouped by phase so segments align with labels */}
+            <div className="flex gap-2 mt-3.5">
+              {D_PHASES.map((ph, pi) => {
+                const before = D_PHASES.slice(0, pi).reduce((a, p) => a + p.steps, 0);
+                const isCurrent = ACTIVE_STEP > before && ACTIVE_STEP <= before + ph.steps;
+                return (
+                  <div key={ph.name} className="flex-1 min-w-0">
+                    <div className="flex gap-1">
+                      {Array.from({ length: ph.steps }, (_, i) => {
+                        const idx = before + i + 1;
+                        const cls = idx < ACTIVE_STEP ? "bg-[var(--ok)]" : idx === ACTIVE_STEP ? "bg-[var(--warn)] animate-pulse" : "bg-[var(--surface-2)]";
+                        return <span key={i} className={"h-1.5 flex-1 min-w-[10px] rounded-full " + cls} />;
+                      })}
+                    </div>
+                    <div className="text-[10px] mt-1.5 text-center truncate" style={{ color: isCurrent ? "var(--warn)" : "var(--text-faint)", fontWeight: isCurrent ? 600 : 400 }}>{ph.name}</div>
+                  </div>);
+              })}
+            </div>
+            <div className="text-[13px] font-medium text-[var(--text)] mt-3">Screw board to frame</div>
+            <div className="text-[12px] text-[var(--text-muted)]">Step {ACTIVE_STEP} of {TOTAL_STEPS} · phase <span className="text-[var(--warn)]">boarding</span> · in progress</div>
+          </div>
+          <div className="hidden md:block w-px self-stretch bg-[var(--border)]" />
+          <div className="text-right md:min-w-[140px]">
+            <div className="text-[11px] text-[var(--text-muted)]">elapsed</div>
+            <div className="text-[28px] font-semibold font-mono mt-1 tabular-nums" style={{ color: overEst ? "var(--err)" : "var(--text)" }}>{elapsed}</div>
+            <div className="text-[11px] text-[var(--text-muted)] mt-1">estimate: 16 min</div>
+            <div className="text-[12px] font-medium mt-1.5 inline-flex items-center gap-1 justify-end" style={{ color: paceColor }}>
+              {overEst ? <I.CircleAlert size={13} /> : <I.CircleCheck size={13} />} {paceLabel}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* two-col bottom */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* micro-processes */}
+        <Card padded={false}>
+          <div className="px-5 pt-4 pb-1 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+            <I.BarChart size={13} /> Time per micro-operation
+          </div>
+          <div className="px-5 text-[10.5px] text-[var(--text-faint)] pb-2">longer bar = slower · color = deviation vs expected</div>
+          <div className="px-5 pb-4 space-y-2">
+            {D_MICRO.map((m) => {
+              const isActive = m.state === "active", isTodo = m.state === "todo";
+              const tone = isActive ? "active" : dDevTone(m.real, m.exp);
+              const delta = dDeltaPct(m.real, m.exp);
+              const w = isTodo ? 0 : ((isActive ? m.exp : m.real) / maxMicro) * 100;
+              return (
+                <div key={m.n} className={"flex items-center gap-2.5 text-[12px] rounded-md px-1.5 py-1 " + (isActive ? "bg-[var(--surface-2)]" : "")} style={{ opacity: isTodo ? 0.45 : 1 }}>
+                  <span className="text-[11px] w-4 shrink-0" style={{ color: isActive ? "var(--warn)" : "var(--text-faint)" }}>{m.n}</span>
+                  <span className={"flex-1 truncate " + (isActive ? "font-medium text-[var(--text)]" : "text-[var(--text)]")}>
+                    {m.name}{isActive && <span className="text-[var(--warn)]"> ← now</span>}
+                  </span>
+                  <span className="w-20 h-1.5 rounded-full bg-[var(--surface-2)] overflow-hidden shrink-0">
+                    <span className={"block h-full rounded-full " + (isActive ? "animate-pulse" : "")} style={{ width: w + "%", background: D_TONE[tone] }} />
+                  </span>
+                  <span className="text-[11px] w-24 text-right shrink-0 tabular-nums" style={{ color: isActive ? "var(--warn)" : "var(--text-muted)" }}>
+                    {isActive ? "in progress" : isTodo ? "—" : (
+                      <>{m.real.toFixed(1)} min{delta != null && delta > 5 && <span style={{ color: D_TONE[tone] }}> · {dFmtDelta(delta)}</span>}</>
+                    )}
+                  </span>
+                </div>);
+            })}
+          </div>
+        </Card>
+
+        {/* right column */}
+        <div className="space-y-3">
+          {/* actual vs estimate */}
+          <Card padded={false}>
+            <div className="px-5 pt-4 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+              <I.Activity size={13} /> Actual vs estimate · by finish order
+            </div>
+            <div className="px-5 pt-2 pb-4">
+              <div className="flex gap-4 text-[11px] text-[var(--text-muted)] mb-3">
+                <span className="inline-flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-sm inline-block" style={{ background: "var(--text-muted)" }} />bar = actual</span>
+                <span className="inline-flex items-center gap-1.5"><span className="w-0.5 h-3 rounded-sm inline-block" style={{ background: "var(--text)" }} />mark = estimate</span>
+              </div>
+              {D_COMPARE.map((c) => {
+                const delta = dDeltaPct(c.real, c.est);
+                const tone = c.running ? "active" : dDevTone(c.real, c.est);
+                const col = D_TONE[tone];
+                return (
+                  <div key={c.ref} className="flex items-center gap-2.5 text-[12px] mb-2.5">
+                    <span className="w-14 text-[var(--text-muted)] shrink-0 font-mono text-[11px]">{c.ref}</span>
+                    <span className="flex-1 h-2 rounded-full bg-[var(--surface-2)] overflow-hidden relative">
+                      <span className="block h-full rounded-full" style={{ width: (c.real / maxCmp * 100) + "%", background: col }} />
+                      <span className="absolute top-[-2px] bottom-[-2px] w-[2px] rounded bg-[var(--text)]" style={{ left: (c.est / maxCmp * 100) + "%" }} title={"estimate " + c.est.toFixed(1) + "m"} />
+                    </span>
+                    <span className="w-12 text-right font-medium text-[var(--text)] tabular-nums text-[11px]">{c.real.toFixed(1)}m</span>
+                    <span className="w-16 text-right tabular-nums text-[11px] font-medium shrink-0" style={{ color: col }}>
+                      {c.running ? "in progress" : dFmtDelta(delta)}
+                    </span>
+                  </div>);
+              })}
+            </div>
+          </Card>
+
+          {/* MES queue */}
+          <Card padded={false}>
+            <div className="px-5 pt-4 pb-2 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
+              <I.List size={13} /> MES sequence · today
+            </div>
+            <div className="px-5 pb-4">
+              <table className="w-full text-[12px]">
+                <thead>
+                  <tr className="text-[var(--text-muted)] text-left border-b border-[var(--border)]">
+                    <th className="font-medium pb-2">Ref.</th><th className="font-medium pb-2">Start</th>
+                    <th className="font-medium pb-2">Dur.</th><th className="font-medium pb-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {D_QUEUE.map((r) => {
+                    const pill = r.status === "done" ? { bg: "var(--ok)", t: "done" } : r.status === "active" ? { bg: "var(--warn)", t: "in progress" } : { bg: "var(--text-faint)", t: "queued" };
+                    return (
+                      <tr key={r.ref} className="border-b border-[var(--border)] last:border-0">
+                        <td className="py-2 font-mono text-[11px] text-[var(--text)]">{r.ref}</td>
+                        <td className="py-2 text-[var(--text-muted)]">{r.start}</td>
+                        <td className="py-2 text-[var(--text-muted)]">{r.dur}</td>
+                        <td className="py-2">
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: pill.bg + "26", color: pill.bg }}>{pill.t}</span>
+                        </td>
+                      </tr>);
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>);
+}
 
 
 function Sidebar({ active, onChange }) {
@@ -1060,7 +1542,7 @@ function MembersList({ members, compact }) {
   );
 }
 
-function BatchSummaryBar({ items, onToggleAll, allCollapsed, onCopyCsv, onClear, copied, mergedCount = 0 }) {
+function BatchSummaryBar({ items, onToggleAll, allCollapsed, onExportCsv, onExportPdf, onClear, mergedCount = 0 }) {
   const total = items.length;
   const success = items.filter(it => it.state === "success").length;
   const error = items.filter(it => it.state === "error").length;
@@ -1111,10 +1593,15 @@ function BatchSummaryBar({ items, onToggleAll, allCollapsed, onCopyCsv, onClear,
             {allCollapsed ? <I.ChevDown size={13} /> : <I.ChevUp size={13} />}
             {allCollapsed ? "Expand all" : "Collapse all"}
           </button>
-          <button type="button" onClick={onCopyCsv} disabled={success === 0}
+          <button type="button" onClick={onExportCsv} disabled={success === 0}
             className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[12.5px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] border border-[var(--border)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            <I.Copy size={13} />
-            {copied ? "Copied" : "Copy CSV"}
+            <I.FileText size={13} />
+            Export CSV
+          </button>
+          <button type="button" onClick={onExportPdf} disabled={success === 0}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[12.5px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] border border-[var(--border)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            <I.FileUp size={13} />
+            Export PDF
           </button>
           <button type="button" onClick={onClear}
             title="Clear all results"
@@ -1287,21 +1774,8 @@ function PredictTab({ server }) {
     setItems(prev => prev.map(it => ({ ...it, expanded: next })));
   }
 
-  async function copyCsv() {
-    const csv = eBuildBatchCsv(itemsRef.current);
-    try {
-      await navigator.clipboard.writeText(csv);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch (e) {
-      const ta = document.createElement("textarea");
-      ta.value = csv;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand("copy"); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch {}
-      ta.remove();
-    }
-  }
+  function exportCsv() { eExportCsv(itemsRef.current); }
+  function exportPdf() { eExportPdf(itemsRef.current); }
 
   function clearAll() {
     setItems([]);
@@ -1362,9 +1836,9 @@ function PredictTab({ server }) {
             mergedCount={totalMerged}
             allCollapsed={allCollapsed}
             onToggleAll={toggleAll}
-            onCopyCsv={copyCsv}
+            onExportCsv={exportCsv}
+            onExportPdf={exportPdf}
             onClear={clearAll}
-            copied={copied}
           />
 
           {keyMergedCount > 0 && (
@@ -2079,7 +2553,7 @@ function HistoryTab({ server, reloadKey }) {
  * ============================================================ */
 function EnterpriseApp() {
   const [server, setServer] = useStateE(E_DEFAULT_SERVER);
-  const [tab, setTab] = useStateE("predict");
+  const [tab, setTab] = useStateE("dashboard");
   const [health, setHealth] = useStateE("checking");
   const [modelName, setModelName] = useStateE("");
   const [reloadKey, setReloadKey] = useStateE(0);
@@ -2113,7 +2587,9 @@ function EnterpriseApp() {
         <TopBar server={server} setServer={setServer} health={health} modelName={modelName} />
         <main className="flex-1 min-h-0 px-6 lg:px-8 py-5 max-w-[1280px] w-full overflow-auto">
           <div key={tab} className="h-full">
+            {tab === "dashboard" && <DashboardPage />}
             {tab === "predict" && <PredictTab server={server} />}
+            {tab === "metrics" && <MetricsPage server={server} />}
             {tab === "retrain" && <RetrainTab server={server} onJobFinished={() => setReloadKey((k) => k + 1)} />}
             {tab === "history" && <HistoryTab server={server} reloadKey={reloadKey} />}
           </div>

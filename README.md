@@ -63,6 +63,26 @@ export GEMINI_API_KEY="..."
 Flags úteis: `train --no-clean` (treina com dados crus), `train --no-gate`
 (deploy sem champion-gate), `predict-drawing --provider gemini` (extração live).
 
+### API, frontend e n8n
+
+```bash
+# servir a API (frontend + n8n consomem esta)
+PYTHONPATH=src python -m uvicorn pipeline.api:app --host 127.0.0.1 --port 8000
+
+# frontend (React in-browser, sem build)
+python -m http.server 5500 -d frontend     # http://127.0.0.1:5500
+```
+
+Páginas do frontend: **Live Dashboard** (mock de chão de fábrica, dados simulados),
+**Predictor** (PDF → previsão por painel/micro-op + export PDF/CSV), **Model Metrics**
+(curva de aprendizagem e calibração ao longo do tempo), **Training** e **History**
+(retreino manual + agendamento).
+
+Para n8n / exposição pública: define `API_KEY` no `.env` (ativa o header `X-API-Key`)
+e abre um túnel (`cloudflared tunnel --url http://127.0.0.1:8000` ou `ngrok http 8000`).
+Endpoints de previsão, retreino e agendamento (e o fluxo n8n) estão em
+[`docs/API.md`](docs/API.md).
+
 ---
 
 ## 3. Como avaliamos (a parte que interessa ao júri)
