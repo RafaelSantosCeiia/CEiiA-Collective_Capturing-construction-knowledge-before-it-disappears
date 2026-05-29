@@ -734,7 +734,7 @@ function DLegend({ className = "" }) {
     </div>);
 }
 
-function DMetric({ icon, label, value, unit, sub, subTone, hint, alert }) {
+function DMetric({ icon, label, value, unit, sub, subTone, hint, alert, tip }) {
   const Icon = icon;
   const sc = subTone === "up" ? "var(--ok)" : subTone === "down" ? "var(--err)" : "var(--text-faint)";
   return (
@@ -742,6 +742,7 @@ function DMetric({ icon, label, value, unit, sub, subTone, hint, alert }) {
       style={alert ? { borderColor: "var(--err)", background: "color-mix(in srgb, var(--err) 8%, var(--surface))" } : { borderColor: "var(--border)" }}>
       <div className="text-[11.5px] flex items-center gap-1.5" style={{ color: alert ? "var(--err)" : "var(--text-muted)" }}>
         <Icon size={13} />{label}
+        {tip && <HelpTip label={label} text={tip} size={13} className="ml-auto" />}
       </div>
       <div className="mt-1.5 text-[22px] font-semibold text-[var(--text)] tabular-nums">
         {value}{unit && <span className="text-[14px] font-normal text-[var(--text-muted)] ml-0.5">{unit}</span>}
@@ -793,12 +794,17 @@ function DashboardPage() {
       <div className="flex items-center justify-between flex-wrap gap-3 pb-1 border-b border-[var(--border)]">
         <div className="flex items-center gap-2.5 text-[15px] font-medium text-[var(--text)]">
           <I.Gauge size={18} /> BluFab · Station 66 — Framing &amp; Boarding
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border border-[var(--warn)]/50 text-[var(--warn)] bg-[var(--warn)]/12">
+            Demo
+          </span>
+          <HelpTip label="Demo dashboard" text="This shop-floor dashboard runs on simulated data — a preview of how it would look fed by live capture at the station (MES / sensors / per-panel label scan). The model already predicts time per panel and per micro-operation; only the live feed is missing." size={14} />
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[12px] text-[var(--text-muted)]">{clock}</span>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ok)]/15 text-[var(--ok)] text-[11px] font-medium px-2.5 py-1">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--ok)] animate-pulse" /> live
           </span>
+          <HelpTip label="Live indicator" text="Shows the dashboard is auto-updating. In this demo the values are simulated rather than read from the station." size={14} />
         </div>
       </div>
 
@@ -807,16 +813,21 @@ function DashboardPage() {
 
       {/* metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <DMetric icon={I.CircleCheck} label="Panels completed" value="7" sub="of 11 planned today" hint="64% of today's plan" />
-        <DMetric icon={I.Clock} label="Avg actual time" value="18" unit="min" sub="↓ 2 min vs estimate" subTone="up" hint="average of panels completed today" />
-        <DMetric icon={I.Activity} label="Model accuracy" value="91" unit="%" sub="↑ 3% this week" subTone="up" hint="predictions within ±15% of actual" />
-        <DMetric icon={I.CircleAlert} label="Deviations > 20%" value="1" sub="ECO_PP01K · 25.4m vs 19.8m est." alert />
+        <DMetric icon={I.CircleCheck} label="Panels completed" value="7" sub="of 11 planned today" hint="64% of today's plan"
+          tip="How many panels have been finished today, out of the number planned for the shift." />
+        <DMetric icon={I.Clock} label="Avg actual time" value="18" unit="min" sub="↓ 2 min vs estimate" subTone="up" hint="average of panels completed today"
+          tip="Average real build time of the panels completed today. The arrow compares it to the estimate (down = faster than estimated)." />
+        <DMetric icon={I.Activity} label="Model accuracy" value="91" unit="%" sub="↑ 3% this week" subTone="up" hint="predictions within ±15% of actual"
+          tip="Share of recent predictions that landed within 15% of the actual measured time. Demo figure — the real, audited accuracy (error vs human floor, calibration) is on the Model Metrics page." />
+        <DMetric icon={I.CircleAlert} label="Deviations > 20%" value="1" sub="ECO_PP01K · 25.4m vs 19.8m est." alert
+          tip="Panels whose real build time differs from the estimate by more than 20% — flagged for a closer look." />
       </div>
 
       {/* in production now */}
       <Card padded={false}>
         <div className="px-5 pt-4 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
           <I.Play size={13} /> In production now
+          <HelpTip label="In production now" text="The panel currently being built at this station: its code, elapsed time vs the estimate, and progress through the micro-operations." size={13} className="ml-auto" />
         </div>
         <div className="px-5 py-4 flex flex-col md:flex-row items-start gap-5">
           <div className="flex-1 min-w-0 w-full">
@@ -861,6 +872,7 @@ function DashboardPage() {
         <Card padded={false}>
           <div className="px-5 pt-4 pb-1 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
             <I.BarChart size={13} /> Time per micro-operation
+            <HelpTip label="Time per micro-operation" text="How long each step of the current panel takes. Bar length = duration; color = deviation from the expected time (green on target, amber/red slower)." size={13} className="ml-auto" />
           </div>
           <div className="px-5 text-[10.5px] text-[var(--text-faint)] pb-2">longer bar = slower · color = deviation vs expected</div>
           <div className="px-5 pb-4 space-y-2">
@@ -894,6 +906,7 @@ function DashboardPage() {
           <Card padded={false}>
             <div className="px-5 pt-4 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
               <I.Activity size={13} /> Actual vs estimate · by finish order
+              <HelpTip label="Actual vs estimate" text="For panels finished today, the real build time (bar) against the original estimate (vertical mark), in the order they finished. Color shows how far off the estimate was." size={13} className="ml-auto" />
             </div>
             <div className="px-5 pt-2 pb-4">
               <div className="flex gap-4 text-[11px] text-[var(--text-muted)] mb-3">
@@ -924,6 +937,7 @@ function DashboardPage() {
           <Card padded={false}>
             <div className="px-5 pt-4 pb-2 text-[12px] font-medium uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5">
               <I.List size={13} /> MES sequence · today
+              <HelpTip label="MES sequence" text="Today's planned production order from the MES (Manufacturing Execution System): each panel's reference, start time, duration and status (done / in progress / queued)." size={13} className="ml-auto" />
             </div>
             <div className="px-5 pb-4">
               <table className="w-full text-[12px]">
